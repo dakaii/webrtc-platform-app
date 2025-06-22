@@ -26,7 +26,7 @@ services:
       - NODE_ENV=${NODE_ENV:-development}
       - CORS_ORIGIN=${CORS_ORIGIN}
     ports:
-      - "${BACKEND_PORT:-3001}:3001"
+      - "${BACKEND_PORT:-4000}:4000"
     depends_on:
       - postgres
     volumes:
@@ -47,7 +47,7 @@ services:
       - SFU_HOST=${SFU_HOST}
       - SFU_PORT=${SFU_PORT}
     ports:
-      - "${SIGNALING_PORT:-3002}:3002"
+      - "${SIGNALING_PORT:-9000}:9000"
     volumes:
       - ./signaling:/app
     networks:
@@ -59,10 +59,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     environment:
-      - VITE_API_URL=http://localhost:${BACKEND_PORT:-3001}
-      - VITE_WS_URL=ws://localhost:${SIGNALING_PORT:-3002}
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-4000}
+      - VITE_WS_URL=ws://localhost:${SIGNALING_PORT:-9000}
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${FRONTEND_PORT:-8080}:8080"
     volumes:
       - ./frontend:/app
       - /app/node_modules

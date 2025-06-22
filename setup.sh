@@ -21,7 +21,7 @@ cd ../signaling
 cargo check
 echo "✅ Rust signaling server dependencies checked"
 
-# Setup Frontend (if we add it later)
+# Setup Frontend
 if [ -d "../frontend" ]; then
     echo "🎨 Setting up Vue.js Frontend..."
     cd ../frontend
@@ -39,9 +39,11 @@ echo "1. Edit .env file with your configuration"
 echo "2. Start PostgreSQL: docker-compose up postgres -d"
 echo "3. Run migrations: cd backend && npm run migration:up"
 echo "4. Start backend: cd backend && npm run start:dev"
-echo "5. Start signaling: cd signaling && cargo run"
+echo "5. Start signaling: cd signaling && JWT_SECRET=dev-super-secret-jwt-key-change-in-production RUST_LOG=info cargo run --release"
+echo "6. Start frontend: cd frontend && npm run dev"
 echo ""
 echo "Services will be available at:"
-echo "- Backend API: http://localhost:3001/api"
-echo "- Signaling Server: ws://localhost:3002"
+echo "- Frontend: http://localhost:8080"
+echo "- Backend API: http://localhost:4000"
+echo "- Signaling Server: ws://localhost:9000"
 echo ""
