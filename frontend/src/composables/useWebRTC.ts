@@ -1,5 +1,6 @@
 import { ref } from "vue";
 import type { Ref } from "vue";
+import { webSocketService } from "@/services/websocket";
 
 interface RemoteParticipant {
   id: string;
@@ -13,6 +14,7 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
   const isMuted = ref(false);
   const isVideoOff = ref(false);
   const peerConnections = new Map<string, RTCPeerConnection>();
+  const currentRoomId = ref<string | null>(null);
 
   const startLocalStream = async (): Promise<void> => {
     try {
@@ -89,69 +91,144 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
 
     // Handle remote stream
     pc.ontrack = (event) => {
+      console.log("Received remote track from", participantId);
       const [remoteStream] = event.streams;
-      const participant = remoteParticipants.value.find(
+
+      // Update the participant with the stream
+      const participantIndex = remoteParticipants.value.findIndex(
         (p) => p.id === participantId
       );
-      if (participant) {
-        participant.stream = remoteStream;
+
+      if (participantIndex !== -1) {
+        remoteParticipants.value[participantIndex].stream = remoteStream;
+
+        // Find and update the video element
+        setTimeout(() => {
+          const videoElement = document.querySelector(
+            `[data-participant-id="${participantId}"]`
+          ) as HTMLVideoElement;
+          if (videoElement) {
+            videoElement.srcObject = remoteStream;
+          }
+        }, 100);
       }
     };
 
     // Handle ICE candidates
     pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        // Send ICE candidate via WebSocket
-        // This would be implemented with the WebSocket service
-        console.log("ICE candidate:", event.candidate);
+      if (event.candidate && currentRoomId.value) {
+        console.log("Sending ICE candidate to", participantId);
+        webSocketService.send({
+          type: "ice_candidate",
+          room_name: currentRoomId.value,
+          candidate: event.candidate.candidate,
+          sdp_mid: event.candidate.sdpMid || undefined,
+          sdp_mline_index: event.candidate.sdpMLineIndex ?? undefined,
+          target_user_id: parseInt(participantId),
+        });
       }
+    };
+
+    // Handle connection state changes
+    pc.onconnectionstatechange = () => {
+      console.log(
+        `Peer connection with ${participantId} state:`,
+        pc.connectionState
+      );
     };
 
     peerConnections.set(participantId, pc);
     return pc;
   };
 
-  const handleSignalingData = async (data: any): Promise<void> => {
-    const { type, payload, from } = data;
+  const handleSignalingMessage = async (data: any): Promise<void> => {
+    const { type, from, payload } = data;
+    console.log("Handling signaling message:", type, "from:", from);
 
     let pc = peerConnections.get(from);
     if (!pc) {
       pc = createPeerConnection(from);
     }
 
-    switch (type) {
-      case "offer":
-        await pc.setRemoteDescription(new RTCSessionDescription(payload));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        // Send answer back via WebSocket
-        console.log("Created answer:", answer);
-        break;
+    try {
+      switch (type) {
+        case "offer":
+          console.log("Received offer from", from);
+          await pc.setRemoteDescription(new RTCSessionDescription(payload));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
 
-      case "answer":
-        await pc.setRemoteDescription(new RTCSessionDescription(payload));
-        break;
+          // Send answer back
+          if (currentRoomId.value) {
+            webSocketService.send({
+              type: "answer",
+              room_name: currentRoomId.value,
+              target_user_id: parseInt(from),
+              sdp: answer.sdp,
+            });
+          }
+          break;
 
-      case "ice-candidate":
-        await pc.addIceCandidate(new RTCIceCandidate(payload));
-        break;
+        case "answer":
+          console.log("Received answer from", from);
+          await pc.setRemoteDescription(new RTCSessionDescription(payload));
+          break;
+
+        case "ice-candidate":
+          console.log("Received ICE candidate from", from);
+          await pc.addIceCandidate(
+            new RTCIceCandidate({
+              candidate: payload.candidate,
+              sdpMid: payload.sdpMid,
+              sdpMLineIndex: payload.sdpMLineIndex,
+            })
+          );
+          break;
+      }
+    } catch (error) {
+      console.error("Error handling signaling message:", error);
     }
   };
 
-  const createOffer = async (participantId: string): Promise<void> => {
+  const createOfferForParticipant = async (
+    participantId: string
+  ): Promise<void> => {
+    console.log("Creating offer for participant:", participantId);
     const pc = createPeerConnection(participantId);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
 
-    // Send offer via WebSocket
-    console.log("Created offer:", offer);
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Send offer via WebSocket
+      if (currentRoomId.value) {
+        webSocketService.send({
+          type: "offer",
+          room_name: currentRoomId.value,
+          target_user_id: parseInt(participantId),
+          sdp: offer.sdp,
+        });
+      }
+    } catch (error) {
+      console.error("Error creating offer:", error);
+    }
   };
 
   const addRemoteParticipant = (participant: RemoteParticipant): void => {
-    remoteParticipants.value.push(participant);
+    console.log("Adding remote participant:", participant);
+    const existingIndex = remoteParticipants.value.findIndex(
+      (p) => p.id === participant.id
+    );
+
+    if (existingIndex === -1) {
+      remoteParticipants.value.push(participant);
+      // Create offer for new participant
+      createOfferForParticipant(participant.id);
+    }
   };
 
   const removeRemoteParticipant = (participantId: string): void => {
+    console.log("Removing remote participant:", participantId);
     const index = remoteParticipants.value.findIndex(
       (p) => p.id === participantId
     );
@@ -166,6 +243,39 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     }
   };
 
+  const joinRoom = (roomId: string): void => {
+    currentRoomId.value = roomId;
+
+    // Setup WebSocket event listeners
+    webSocketService.on("offer", handleSignalingMessage);
+    webSocketService.on("answer", handleSignalingMessage);
+    webSocketService.on("ice-candidate", handleSignalingMessage);
+
+    // Send join room message
+    webSocketService.send({
+      type: "join_room",
+      room_name: roomId,
+    });
+  };
+
+  const leaveRoom = (): void => {
+    if (currentRoomId.value) {
+      webSocketService.send({
+        type: "leave_room",
+        room_name: currentRoomId.value,
+      });
+    }
+
+    // Cleanup
+    stopLocalStream();
+    currentRoomId.value = null;
+
+    // Remove event listeners
+    webSocketService.off("offer", handleSignalingMessage);
+    webSocketService.off("answer", handleSignalingMessage);
+    webSocketService.off("ice-candidate", handleSignalingMessage);
+  };
+
   return {
     localStream,
     remoteParticipants,
@@ -175,9 +285,10 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     stopLocalStream,
     toggleMute,
     toggleVideo,
-    handleSignalingData,
-    createOffer,
+    handleSignalingMessage,
     addRemoteParticipant,
     removeRemoteParticipant,
+    joinRoom,
+    leaveRoom,
   };
 }

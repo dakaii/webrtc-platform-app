@@ -46,8 +46,14 @@ export interface JoinRoomData {
 }
 
 export interface WebRTCMessage {
-  type: "offer" | "answer" | "ice-candidate" | "join-room" | "leave-room";
-  payload: any;
+  type: "offer" | "answer" | "ice_candidate" | "join_room" | "leave_room";
+  room_name: string;
+  target_user_id?: number;
+  sdp?: string;
+  candidate?: string;
+  sdp_mid?: string;
+  sdp_mline_index?: number;
+  password?: string;
 }
 
 export interface SignalingMessage {

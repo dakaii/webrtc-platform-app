@@ -70,7 +70,7 @@
           class="relative bg-gray-800 rounded-lg overflow-hidden"
         >
           <video
-            :ref="`remoteVideo-${participant.id}`"
+            :data-participant-id="participant.id"
             autoplay
             class="w-full h-full object-cover"
           ></video>
@@ -87,12 +87,14 @@
 import { onMounted, onUnmounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useRoomsStore } from '@/stores/rooms'
+import { useAuthStore } from '@/stores/auth'
 import { webSocketService } from '@/services/websocket'
 import { useWebRTC } from '@/composables/useWebRTC'
 
 const route = useRoute()
 const router = useRouter()
 const roomsStore = useRoomsStore()
+const authStore = useAuthStore()
 
 const roomId = Number(route.params.id)
 const localVideo = ref<HTMLVideoElement>()
@@ -106,11 +108,14 @@ const {
   stopLocalStream,
   toggleMute,
   toggleVideo,
-  handleSignalingData
+  addRemoteParticipant,
+  removeRemoteParticipant,
+  joinRoom: joinWebRTCRoom,
+  leaveRoom: leaveWebRTCRoom,
 } = useWebRTC(localVideo)
 
 const participantCount = computed(() => {
-  return (currentRoom.value?.participants?.length || 0) + remoteParticipants.value.length
+  return 1 + remoteParticipants.value.length // 1 for local user + remote participants
 })
 
 onMounted(async () => {
@@ -118,14 +123,22 @@ onMounted(async () => {
     // Get room details
     await roomsStore.getRoom(roomId)
 
-    // Join the room
+    // Join the room via API
     await roomsStore.joinRoom(roomId)
 
     // Start local video stream
     await startLocalStream()
 
-    // Setup WebSocket for signaling
+    // Connect to WebSocket if not already connected
+    if (!webSocketService.isConnected && authStore.token) {
+      await webSocketService.connect(authStore.token)
+    }
+
+    // Setup WebSocket event listeners
     setupSignaling()
+
+    // Join the WebRTC room
+    joinWebRTCRoom(roomId.toString())
   } catch (error) {
     console.error('Failed to join room:', error)
     router.push('/rooms')
@@ -133,7 +146,7 @@ onMounted(async () => {
 })
 
 onUnmounted(async () => {
-  stopLocalStream()
+  leaveWebRTCRoom()
   if (currentRoom.value) {
     await roomsStore.leaveRoom(currentRoom.value.id)
   }
@@ -142,26 +155,53 @@ onUnmounted(async () => {
 const setupSignaling = () => {
   webSocketService.on('user-joined', handleUserJoined)
   webSocketService.on('user-left', handleUserLeft)
-  webSocketService.on('offer', handleSignalingData)
-  webSocketService.on('answer', handleSignalingData)
-  webSocketService.on('ice-candidate', handleSignalingData)
+  webSocketService.on('room-users', handleRoomUsers)
 }
 
 const handleUserJoined = (data: any) => {
-  console.log('User joined:', data)
-  // Handle new user joining
+  console.log('User joined room:', data)
+  const { user_id, username } = data
+
+  // Add the new participant
+  if (user_id && username && user_id !== authStore.user?.id.toString()) {
+    addRemoteParticipant({
+      id: user_id,
+      username: username,
+    })
+  }
 }
 
 const handleUserLeft = (data: any) => {
-  console.log('User left:', data)
-  // Handle user leaving
+  console.log('User left room:', data)
+  const { user_id } = data
+
+  if (user_id) {
+    removeRemoteParticipant(user_id)
+  }
+}
+
+const handleRoomUsers = (data: any) => {
+  console.log('Room users:', data)
+  const { users } = data
+
+  // Add all existing users in the room (except current user)
+  if (users && Array.isArray(users)) {
+    users.forEach((user: any) => {
+      if (user.user_id !== authStore.user?.id.toString()) {
+        addRemoteParticipant({
+          id: user.user_id,
+          username: user.username,
+        })
+      }
+    })
+  }
 }
 
 const leaveRoom = async () => {
+  leaveWebRTCRoom()
   if (currentRoom.value) {
     await roomsStore.leaveRoom(currentRoom.value.id)
   }
-  stopLocalStream()
   router.push('/rooms')
 }
 </script>
