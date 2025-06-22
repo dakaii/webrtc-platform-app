@@ -14,6 +14,7 @@ export interface Room {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  participantCount: number;
   participants?: User[];
 }
 

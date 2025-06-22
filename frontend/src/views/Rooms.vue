@@ -42,7 +42,7 @@
           <p v-if="room.description" class="text-gray-600 mb-4">{{ room.description }}</p>
 
           <div class="flex items-center justify-between text-sm text-gray-500">
-            <span>{{ room.participants?.length || 0 }}/{{ room.maxParticipants }} participants</span>
+            <span>{{ room.participantCount || 0 }}/{{ room.maxParticipants }} participants</span>
           </div>
         </div>
       </div>
@@ -89,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, reactive } from 'vue'
+import { onMounted, ref, reactive, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useRoomsStore } from '@/stores/rooms'
 import type { Room, CreateRoomData } from '@/types'
@@ -106,8 +106,10 @@ const newRoom = reactive<CreateRoomData>({
   maxParticipants: 10
 })
 
-// Use store's reactive data directly
-const { rooms, loading, error } = roomsStore
+// Use store's reactive data directly (don't destructure to maintain reactivity)
+const rooms = computed(() => roomsStore.rooms)
+const loading = computed(() => roomsStore.loading)
+const error = computed(() => roomsStore.error)
 
 onMounted(async () => {
   await roomsStore.fetchRooms()
