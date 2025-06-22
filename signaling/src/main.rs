@@ -1,21 +1,16 @@
 mod auth;
+mod messages;
 mod room;
 mod server;
-mod messages;
 
 use anyhow::Result;
 use clap::Parser;
 use std::env;
-use tracing::{info, error};
-use tracing_subscriber;
 
 #[derive(Parser)]
 #[command(name = "webrtc-signaling")]
-#[command(about = "WebRTC signaling server with JWT authentication")]
+#[command(about = "A WebRTC signaling server")]
 struct Args {
-    #[arg(short, long, default_value = "9000")]
-    port: u16,
-
     #[arg(short, long, default_value = "0.0.0.0")]
     host: String,
 }
@@ -32,21 +27,17 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    // Get JWT secret from environment
+    let host = args.host;
+    let port = env::var("PORT")
+        .unwrap_or_else(|_| "9000".to_string())
+        .parse::<u16>()
+        .unwrap_or(9000);
+
     let jwt_secret = env::var("JWT_SECRET")
-        .unwrap_or_else(|_| {
-            error!("JWT_SECRET environment variable not set, using default (INSECURE!)");
-            "dev-super-secret-jwt-key-change-in-production".to_string()
-        });
+        .expect("JWT_SECRET environment variable is required");
 
-    info!("Starting WebRTC signaling server on {}:{}", args.host, args.port);
-    info!("JWT authentication enabled");
+    println!("Starting WebRTC signaling server on {}:{}", host, port);
+    println!("JWT authentication enabled");
 
-    // Start the server
-    if let Err(e) = server::start_server(args.host, args.port, jwt_secret).await {
-        error!("Server error: {}", e);
-        std::process::exit(1);
-    }
-
-    Ok(())
+    server::start_server(host, port, jwt_secret).await
 }
