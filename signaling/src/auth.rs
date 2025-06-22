@@ -4,7 +4,7 @@ use tracing::{debug, error};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String, // subject (user ID as string)
+    pub sub: u32, // subject (user ID as number)
     pub username: String,
     pub iat: usize, // issued at
     pub exp: usize, // expiration
@@ -41,14 +41,8 @@ impl JwtValidator {
                 let claims = token_data.claims;
                 debug!("Token validated for user: {}", claims.username);
 
-                // Parse user ID from subject
-                let user_id = claims
-                    .sub
-                    .parse::<u32>()
-                    .map_err(|_| "Invalid user ID in token".to_string())?;
-
                 Ok(AuthenticatedUser {
-                    user_id,
+                    user_id: claims.sub,
                     username: claims.username,
                 })
             }
