@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # PostgreSQL Database
   postgres:
@@ -30,6 +28,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+      target: development
     environment:
       - DATABASE_URL=postgresql://${DB_USER:-webrtc_user}:${DB_PASSWORD:-webrtc_password}@postgres:5432/${DB_NAME:-webrtc_db}
       - JWT_SECRET=${JWT_SECRET:-dev-super-secret-jwt-key-change-in-production}
@@ -41,8 +40,8 @@ services:
       postgres:
         condition: service_healthy
     volumes:
-      - ./backend:/app
-      - /app/node_modules
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
     networks:
       - webrtc-network
     command: npm run start:dev
@@ -69,6 +68,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: development
     environment:
       - VITE_API_URL=http://localhost:${BACKEND_PORT:-4000}
       - VITE_WS_URL=ws://localhost:${SIGNALING_PORT:-9000}
