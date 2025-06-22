@@ -155,42 +155,42 @@ onUnmounted(async () => {
 const setupSignaling = () => {
   webSocketService.on('user-joined', handleUserJoined)
   webSocketService.on('user-left', handleUserLeft)
-  webSocketService.on('room-users', handleRoomUsers)
+  webSocketService.on('room-joined', handleRoomJoined)
 }
 
 const handleUserJoined = (data: any) => {
   console.log('User joined room:', data)
-  const { user_id, username } = data
+  const { user } = data
 
   // Add the new participant
-  if (user_id && username && user_id !== authStore.user?.id.toString()) {
+  if (user && user.userId && user.username && user.userId !== authStore.user?.id) {
     addRemoteParticipant({
-      id: user_id,
-      username: username,
+      id: user.userId.toString(),
+      username: user.username,
     })
   }
 }
 
 const handleUserLeft = (data: any) => {
   console.log('User left room:', data)
-  const { user_id } = data
+  const { userId } = data
 
-  if (user_id) {
-    removeRemoteParticipant(user_id)
+  if (userId) {
+    removeRemoteParticipant(userId.toString())
   }
 }
 
-const handleRoomUsers = (data: any) => {
-  console.log('Room users:', data)
-  const { users } = data
+const handleRoomJoined = (data: any) => {
+  console.log('Room joined:', data)
+  const { participants } = data
 
   // Add all existing users in the room (except current user)
-  if (users && Array.isArray(users)) {
-    users.forEach((user: any) => {
-      if (user.user_id !== authStore.user?.id.toString()) {
+  if (participants && Array.isArray(participants)) {
+    participants.forEach((participant: any) => {
+      if (participant.userId !== authStore.user?.id) {
         addRemoteParticipant({
-          id: user.user_id,
-          username: user.username,
+          id: participant.userId.toString(),
+          username: participant.username,
         })
       }
     })

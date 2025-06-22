@@ -119,12 +119,12 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
       if (event.candidate && currentRoomId.value) {
         console.log("Sending ICE candidate to", participantId);
         webSocketService.send({
-          type: "ice_candidate",
-          room_name: currentRoomId.value,
+          type: "ice-candidate",
+          roomName: currentRoomId.value,
           candidate: event.candidate.candidate,
-          sdp_mid: event.candidate.sdpMid || undefined,
-          sdp_mline_index: event.candidate.sdpMLineIndex ?? undefined,
-          target_user_id: parseInt(participantId),
+          sdpMid: event.candidate.sdpMid || undefined,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
+          targetUserId: parseInt(participantId),
         });
       }
     };
@@ -162,8 +162,8 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
           if (currentRoomId.value) {
             webSocketService.send({
               type: "answer",
-              room_name: currentRoomId.value,
-              target_user_id: parseInt(from),
+              roomName: currentRoomId.value,
+              targetUserId: parseInt(from),
               sdp: answer.sdp,
             });
           }
@@ -204,8 +204,8 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
       if (currentRoomId.value) {
         webSocketService.send({
           type: "offer",
-          room_name: currentRoomId.value,
-          target_user_id: parseInt(participantId),
+          roomName: currentRoomId.value,
+          targetUserId: parseInt(participantId),
           sdp: offer.sdp,
         });
       }
@@ -253,16 +253,16 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
 
     // Send join room message
     webSocketService.send({
-      type: "join_room",
-      room_name: roomId,
+      type: "join-room",
+      roomName: roomId,
     });
   };
 
   const leaveRoom = (): void => {
     if (currentRoomId.value) {
       webSocketService.send({
-        type: "leave_room",
-        room_name: currentRoomId.value,
+        type: "leave-room",
+        roomName: currentRoomId.value,
       });
     }
 

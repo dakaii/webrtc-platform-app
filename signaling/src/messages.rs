@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum ClientMessage {
-    #[serde(rename = "join_room")]
+    #[serde(rename = "join-room")]
     JoinRoom {
         room_name: String,
         password: Option<String>,
     },
 
-    #[serde(rename = "leave_room")]
+    #[serde(rename = "leave-room")]
     LeaveRoom { room_name: String },
 
     #[serde(rename = "offer")]
@@ -26,7 +26,7 @@ pub enum ClientMessage {
         target_user_id: u32,
     },
 
-    #[serde(rename = "ice_candidate")]
+    #[serde(rename = "ice-candidate")]
     IceCandidate {
         room_name: String,
         candidate: String,
@@ -37,25 +37,25 @@ pub enum ClientMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum ServerMessage {
-    #[serde(rename = "room_joined")]
+    #[serde(rename = "room-joined")]
     RoomJoined {
         room_name: String,
         user_id: u32,
         participants: Vec<Participant>,
     },
 
-    #[serde(rename = "room_left")]
+    #[serde(rename = "room-left")]
     RoomLeft { room_name: String, user_id: u32 },
 
-    #[serde(rename = "user_joined")]
+    #[serde(rename = "user-joined")]
     UserJoined {
         room_name: String,
         user: Participant,
     },
 
-    #[serde(rename = "user_left")]
+    #[serde(rename = "user-left")]
     UserLeft { room_name: String, user_id: u32 },
 
     #[serde(rename = "offer")]
@@ -72,7 +72,7 @@ pub enum ServerMessage {
         sdp: String,
     },
 
-    #[serde(rename = "ice_candidate")]
+    #[serde(rename = "ice-candidate")]
     IceCandidate {
         room_name: String,
         from_user_id: u32,
@@ -89,6 +89,7 @@ pub enum ServerMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Participant {
     pub user_id: u32,
     pub username: String,
