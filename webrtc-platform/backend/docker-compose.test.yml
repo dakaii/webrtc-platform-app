@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  test-db:
+    container_name: chirp-test-db
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: chirp_test
+    ports:
+      - '5433:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+
+  test-app:
+    container_name: chirp-test-app
+    build:
+      context: .
+      target: development
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm test
+    environment:
+      NODE_ENV: test
+      TEST_DB_HOST: test-db
+      TEST_DB_PORT: 5432
+      TEST_DB_USER: postgres
+      TEST_DB_PASSWORD: postgres
+      TEST_DB_NAME: chirp_test
+      MIKRO_ORM_CONFIG_PATH: ./test/mikro-orm.config.ts
+    depends_on:
+      - test-db
