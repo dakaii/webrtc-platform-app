@@ -1,6 +1,6 @@
-import { ref } from "vue";
-import type { Ref } from "vue";
+import { ref, onUnmounted, type Ref } from "vue";
 import { webSocketService } from "@/services/websocket";
+import type { ServerMessage } from "@/types";
 
 interface RemoteParticipant {
   id: string;
@@ -11,10 +11,11 @@ interface RemoteParticipant {
 export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
   const localStream = ref<MediaStream | null>(null);
   const remoteParticipants = ref<RemoteParticipant[]>([]);
+  const currentRoomId = ref<string | null>(null);
   const isMuted = ref(false);
   const isVideoOff = ref(false);
+
   const peerConnections = new Map<string, RTCPeerConnection>();
-  const currentRoomId = ref<string | null>(null);
 
   const startLocalStream = async (): Promise<void> => {
     try {
@@ -28,28 +29,26 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
       if (localVideo.value) {
         localVideo.value.srcObject = stream;
       }
+
+      console.log("Local stream started");
     } catch (error) {
-      console.error("Failed to start local stream:", error);
+      console.error("Error accessing media devices:", error);
       throw error;
     }
   };
 
   const stopLocalStream = (): void => {
     if (localStream.value) {
-      localStream.value.getTracks().forEach((track) => {
-        track.stop();
-      });
+      localStream.value.getTracks().forEach((track) => track.stop());
       localStream.value = null;
     }
 
-    if (localVideo.value) {
-      localVideo.value.srcObject = null;
-    }
-
-    // Close all peer connections
+    // Clean up all peer connections
     peerConnections.forEach((pc) => pc.close());
     peerConnections.clear();
     remoteParticipants.value = [];
+
+    console.log("Local stream stopped");
   };
 
   const toggleMute = (): void => {
@@ -73,6 +72,8 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
   };
 
   const createPeerConnection = (participantId: string): RTCPeerConnection => {
+    console.log("Creating peer connection for participant:", participantId);
+
     const config: RTCConfiguration = {
       iceServers: [
         { urls: "stun:stun.l.google.com:19302" },
@@ -122,8 +123,8 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
           type: "ice-candidate",
           roomName: currentRoomId.value,
           candidate: event.candidate.candidate,
-          sdpMid: event.candidate.sdpMid || undefined,
-          sdpMLineIndex: event.candidate.sdpMLineIndex ?? undefined,
+          sdpMid: event.candidate.sdpMid || null,
+          sdpMLineIndex: event.candidate.sdpMLineIndex ?? null,
           targetUserId: parseInt(participantId),
         });
       }
@@ -141,48 +142,67 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     return pc;
   };
 
-  const handleSignalingMessage = async (data: any): Promise<void> => {
-    const { type, from, payload } = data;
-    console.log("Handling signaling message:", type, "from:", from);
+  const handleSignalingMessage = async (
+    message: ServerMessage
+  ): Promise<void> => {
+    console.log(
+      "Handling signaling message:",
+      message.type,
+      "from:",
+      message.fromUserId
+    );
 
-    let pc = peerConnections.get(from);
+    if (!message.fromUserId) return;
+
+    const participantId = message.fromUserId.toString();
+    let pc = peerConnections.get(participantId);
     if (!pc) {
-      pc = createPeerConnection(from);
+      pc = createPeerConnection(participantId);
     }
 
     try {
-      switch (type) {
+      switch (message.type) {
         case "offer":
-          console.log("Received offer from", from);
-          await pc.setRemoteDescription(new RTCSessionDescription(payload));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
+          console.log("Received offer from", participantId);
+          if (message.sdp) {
+            await pc.setRemoteDescription(
+              new RTCSessionDescription({ type: "offer", sdp: message.sdp })
+            );
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
 
-          // Send answer back
-          if (currentRoomId.value) {
-            webSocketService.send({
-              type: "answer",
-              roomName: currentRoomId.value,
-              targetUserId: parseInt(from),
-              sdp: answer.sdp,
-            });
+            // Send answer back
+            if (currentRoomId.value) {
+              webSocketService.send({
+                type: "answer",
+                roomName: currentRoomId.value,
+                targetUserId: parseInt(participantId),
+                sdp: answer.sdp,
+              });
+            }
           }
           break;
 
         case "answer":
-          console.log("Received answer from", from);
-          await pc.setRemoteDescription(new RTCSessionDescription(payload));
+          console.log("Received answer from", participantId);
+          if (message.sdp) {
+            await pc.setRemoteDescription(
+              new RTCSessionDescription({ type: "answer", sdp: message.sdp })
+            );
+          }
           break;
 
         case "ice-candidate":
-          console.log("Received ICE candidate from", from);
-          await pc.addIceCandidate(
-            new RTCIceCandidate({
-              candidate: payload.candidate,
-              sdpMid: payload.sdpMid,
-              sdpMLineIndex: payload.sdpMLineIndex,
-            })
-          );
+          console.log("Received ICE candidate from", participantId);
+          if (message.candidate) {
+            await pc.addIceCandidate(
+              new RTCIceCandidate({
+                candidate: message.candidate,
+                sdpMid: message.sdpMid || undefined,
+                sdpMLineIndex: message.sdpMLineIndex || undefined,
+              })
+            );
+          }
           break;
       }
     } catch (error) {
@@ -285,7 +305,6 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     stopLocalStream,
     toggleMute,
     toggleVideo,
-    handleSignalingMessage,
     addRemoteParticipant,
     removeRemoteParticipant,
     joinRoom,

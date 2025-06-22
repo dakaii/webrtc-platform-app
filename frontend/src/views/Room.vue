@@ -158,35 +158,33 @@ const setupSignaling = () => {
   webSocketService.on('room-joined', handleRoomJoined)
 }
 
-const handleUserJoined = (data: any) => {
-  console.log('User joined room:', data)
-  const { user } = data
+const handleUserJoined = (message: any) => {
+  console.log('User joined room:', message)
 
-  // Add the new participant
-  if (user && user.userId && user.username && user.userId !== authStore.user?.id) {
+  // ServerMessage format: { type: "user-joined", roomName: string, user: Participant }
+  if (message.user && message.user.userId && message.user.username && message.user.userId !== authStore.user?.id) {
     addRemoteParticipant({
-      id: user.userId.toString(),
-      username: user.username,
+      id: message.user.userId.toString(),
+      username: message.user.username,
     })
   }
 }
 
-const handleUserLeft = (data: any) => {
-  console.log('User left room:', data)
-  const { userId } = data
+const handleUserLeft = (message: any) => {
+  console.log('User left room:', message)
 
-  if (userId) {
-    removeRemoteParticipant(userId.toString())
+  // ServerMessage format: { type: "user-left", roomName: string, userId: number }
+  if (message.userId) {
+    removeRemoteParticipant(message.userId.toString())
   }
 }
 
-const handleRoomJoined = (data: any) => {
-  console.log('Room joined:', data)
-  const { participants } = data
+const handleRoomJoined = (message: any) => {
+  console.log('Room joined:', message)
 
-  // Add all existing users in the room (except current user)
-  if (participants && Array.isArray(participants)) {
-    participants.forEach((participant: any) => {
+  // ServerMessage format: { type: "room-joined", roomName: string, userId: number, participants: Participant[] }
+  if (message.participants && Array.isArray(message.participants)) {
+    message.participants.forEach((participant: any) => {
       if (participant.userId !== authStore.user?.id) {
         addRemoteParticipant({
           id: participant.userId.toString(),
