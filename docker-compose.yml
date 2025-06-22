@@ -58,7 +58,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - JWT_SECRET=${JWT_SECRET:-dev-super-secret-jwt-key-change-in-production}
-      - RUST_LOG=${RUST_LOG:-info}
+      - RUST_LOG=debug
     ports:
       - "${SIGNALING_PORT:-3002}:9000"
     volumes:
