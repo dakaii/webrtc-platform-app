@@ -1,6 +1,6 @@
 import type { SignalingMessage, WebRTCMessage } from "@/types";
 
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:9000";
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:3002";
 
 export type WebSocketEventHandler = (data: any) => void;
 
@@ -15,13 +15,41 @@ class WebSocketService {
   connect(token: string): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        // Include JWT token in connection URL
-        this.ws = new WebSocket(`${WS_URL}?token=${token}`);
+        // Connect without token in URL - we'll send it as first message
+        this.ws = new WebSocket(WS_URL);
 
         this.ws.onopen = () => {
-          console.log("WebSocket connected");
-          this.reconnectAttempts = 0;
-          resolve();
+          console.log("WebSocket connected, sending auth message");
+
+          // Send authentication as first message
+          const authMessage = {
+            type: "auth",
+            token: token,
+          };
+
+          this.ws!.send(JSON.stringify(authMessage));
+
+          // Wait for authentication confirmation before resolving
+          const authHandler = (message: any) => {
+            if (message.type === "authenticated") {
+              console.log("Authentication successful:", message);
+              this.reconnectAttempts = 0;
+              // Clean up auth handlers
+              this.off("authenticated", authHandler);
+              this.off("error", authHandler);
+              resolve();
+            } else if (message.type === "error") {
+              console.error("Authentication failed:", message);
+              // Clean up auth handlers
+              this.off("authenticated", authHandler);
+              this.off("error", authHandler);
+              reject(new Error(`Authentication failed: ${message.message}`));
+            }
+          };
+
+          // Temporarily listen for auth response
+          this.on("authenticated", authHandler);
+          this.on("error", authHandler);
         };
 
         this.ws.onmessage = (event) => {
