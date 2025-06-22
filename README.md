@@ -2,211 +2,257 @@
 
 A full-stack WebRTC video calling platform with Rust signaling server, NestJS backend, and Vue.js frontend.
 
-## Architecture
-
-- **Backend**: NestJS with TypeScript, PostgreSQL, JWT authentication
-- **Signaling Server**: Rust WebSocket server for WebRTC signaling
-- **Frontend**: Vue.js 3 with Vite and TypeScript
-- **Database**: PostgreSQL (running on Docker)
-
-## Quick Start
+## 🚀 Quick Start with Docker Compose
 
 ### Prerequisites
 
-- Node.js 18+
-- Docker and Docker Compose
-- Rust (for signaling server)
+- Docker and Docker Compose installed
+- Git
 
-### Environment Setup
-
-1. **Copy environment variables:**
-
-   ```bash
-   cp env.example .env
-   ```
-
-2. **Start PostgreSQL database:**
-
-   ```bash
-   docker compose up -d postgres
-   ```
-
-3. **Run database migrations:**
-   ```bash
-   cd backend
-   npm install
-   npm run migration:up
-   ```
-
-## Running the Application
-
-You can run the backend in two ways:
-
-### Method 1: Direct NestJS Development Server (Recommended for development)
+### One-Command Setup
 
 ```bash
-# Terminal 1: Start PostgreSQL (if not running)
-docker compose up -d postgres
+# Clone the repository
+git clone https://github.com/dakaii/vibertc.git
+cd vibertc
 
-# Terminal 2: Start NestJS backend
-cd backend
-npm run start:dev
+# Start all services
+docker compose up --build
 
-# Terminal 3: Start Rust signaling server
-cd signaling
-cargo run
-
-# Terminal 4: Start Vue.js frontend
-cd frontend
-npm run dev
+# Or run in background
+docker compose up --build -d
 ```
 
-**Advantages:**
+That's it! All services will start automatically:
 
-- ✅ Fast hot-reload during development
-- ✅ Direct access to Node.js debugging tools
-- ✅ Quick iteration cycle
-- ✅ Full TypeScript support and IDE integration
+- **Frontend**: http://localhost:8080
+- **Backend API**: http://localhost:4000
+- **Signaling Server**: ws://localhost:9000
+- **PostgreSQL**: localhost:5433
 
-### Method 2: Full Docker Compose (Production-like)
+### Stop Services
+
+```bash
+# Stop and remove containers
+docker compose down
+
+# Stop and remove containers + volumes (clean slate)
+docker compose down -v
+```
+
+## 🏗️ Architecture
+
+```
+Frontend (Vue.js) :8080
+    ↓ HTTP API calls
+Backend (NestJS) :4000 ←→ PostgreSQL :5433
+    ↓ WebSocket connections
+Signaling Server (Rust) :9000
+```
+
+## 🛠️ Development Mode
+
+For active development with hot reload:
+
+```bash
+# Start only the database
+docker compose up postgres -d
+
+# Run services individually for development
+# Terminal 1: Backend
+cd backend && npm install && npm run start:dev
+
+# Terminal 2: Signaling Server
+cd signaling && JWT_SECRET=dev-super-secret-jwt-key-change-in-production RUST_LOG=info cargo run --release
+
+# Terminal 3: Frontend
+cd frontend && npm install && npm run dev
+```
+
+## 📝 Environment Variables
+
+Create a `.env` file in the root directory:
+
+```bash
+# Copy the example
+cp env.example .env
+
+# Edit as needed
+nano .env
+```
+
+### Key Environment Variables
+
+```env
+# Database
+DB_NAME=webrtc_db
+DB_USER=webrtc_user
+DB_PASSWORD=webrtc_password
+DB_PORT=5433
+
+# Service Ports
+BACKEND_PORT=4000
+SIGNALING_PORT=9000
+FRONTEND_PORT=8080
+
+# Security
+JWT_SECRET=your-super-secret-jwt-key-change-in-production
+
+# Development
+NODE_ENV=development
+RUST_LOG=info
+```
+
+## 🔧 Available Commands
+
+### Docker Compose Commands
 
 ```bash
 # Start all services
+docker compose up
+
+# Start in background
 docker compose up -d
 
-# Or start specific services
-docker compose up -d backend signaling frontend
+# Build and start
+docker compose up --build
+
+# Stop services
+docker compose down
+
+# View logs
+docker compose logs
+
+# View logs for specific service
+docker compose logs backend
+
+# Restart a service
+docker compose restart backend
+
+# Scale a service (if needed)
+docker compose up --scale backend=2
 ```
 
-**Advantages:**
-
-- ✅ Production-like environment
-- ✅ Isolated services
-- ✅ Easy deployment
-- ✅ Consistent environment across team
-
-## Database Configuration
-
-The application uses PostgreSQL running on **port 5433** (not the default 5432) to avoid conflicts with other PostgreSQL instances.
-
-### Database Connection Details:
-
-- **Host**: localhost
-- **Port**: 5433
-- **Database**: webrtc_db
-- **User**: webrtc_user
-- **Password**: webrtc_password
-
-Both running methods connect to the **same PostgreSQL instance** running in Docker.
-
-## API Endpoints
-
-### Authentication
-
-- `POST /auth/register` - Register new user
-- `POST /auth/login` - Login user
-- `GET /auth/profile` - Get user profile (requires JWT)
-
-### Rooms
-
-- `GET /rooms` - List all rooms
-- `POST /rooms` - Create new room
-- `GET /rooms/:id` - Get room details
-- `POST /rooms/:id/join` - Join room
-- `POST /rooms/:id/leave` - Leave room
-
-## Development Workflow
-
-### For Backend Development:
-
-1. Use **Method 1** (Direct NestJS) for faster development
-2. Database migrations: `npm run migration:up`
-3. Hot reload is enabled with `npm run start:dev`
-
-### For Full Stack Development:
-
-1. Use **Method 2** (Docker Compose) to test service integration
-2. All services communicate through Docker network
-
-### Database Operations:
+### Individual Service Commands
 
 ```bash
+# Backend
 cd backend
+npm install
+npm run start:dev      # Development
+npm run start:prod     # Production
+npm run migration:up   # Run migrations
 
-# Create new migration
-npm run migration:create
+# Signaling Server
+cd signaling
+cargo run              # Development
+cargo run --release    # Production
 
-# Run migrations
-npm run migration:up
-
-# Rollback migrations
-npm run migration:down
+# Frontend
+cd frontend
+npm install
+npm run dev            # Development
+npm run build          # Build for production
 ```
 
-## Troubleshooting
+## 🧪 Testing the Application
+
+1. **Open your browser** and go to http://localhost:8080
+2. **Register a new account** or login
+3. **Create a room** or join an existing room
+4. **Test video calling** functionality between multiple browser tabs/windows
+
+## 📊 Monitoring
+
+### Check Service Health
+
+```bash
+# View all running containers
+docker compose ps
+
+# Check logs
+docker compose logs -f
+
+# Check individual service logs
+docker compose logs -f backend
+docker compose logs -f signaling
+docker compose logs -f frontend
+docker compose logs -f postgres
+```
+
+### Database Access
+
+```bash
+# Connect to PostgreSQL
+docker compose exec postgres psql -U webrtc_user -d webrtc_db
+
+# Or from host (if you have psql installed)
+psql -h localhost -p 5433 -U webrtc_user -d webrtc_db
+```
+
+## 🔧 Troubleshooting
 
 ### Port Conflicts
 
-If you encounter port conflicts:
+If you get port conflicts, update the `.env` file:
 
-- PostgreSQL runs on port **5433** (not 5432)
-- Backend runs on port **3001**
-- Signaling server runs on port **3002**
-- Frontend runs on port **3000**
+```env
+BACKEND_PORT=4001
+SIGNALING_PORT=9001
+FRONTEND_PORT=8081
+DB_PORT=5434
+```
 
-### Database Connection Issues
+### Container Issues
 
-1. Ensure PostgreSQL container is running:
+```bash
+# Rebuild containers
+docker compose build --no-cache
 
+# Remove all containers and start fresh
+docker compose down -v
+docker compose up --build
+
+# Check container status
+docker compose ps
+```
+
+### Database Issues
+
+```bash
+# Reset database
+docker compose down -v
+docker compose up postgres -d
+
+# Check database logs
+docker compose logs postgres
+```
+
+## 🚀 Production Deployment
+
+For production deployment:
+
+1. **Update environment variables** in `.env`
+2. **Use production builds**:
    ```bash
-   docker ps | grep postgres
+   docker compose -f docker-compose.prod.yml up -d
    ```
+3. **Set up reverse proxy** (nginx/traefik)
+4. **Configure SSL certificates**
+5. **Set up monitoring** and logging
 
-2. Check database connectivity:
-   ```bash
-   docker exec -it webrtc-platform-postgres-1 psql -U webrtc_user -d webrtc_db -c "SELECT 1;"
-   ```
-
-### Environment Variables Not Loading
-
-- Ensure `.env` file exists in both root and `backend/` directories
-- Check that `dotenv` package is installed in backend
-
-## Technology Stack
-
-### Backend (NestJS)
-
-- **Database**: MikroORM with PostgreSQL
-- **Authentication**: JWT tokens
-- **Validation**: class-validator
-- **API**: RESTful endpoints
-
-### Signaling Server (Rust)
-
-- **WebSocket**: tokio-tungstenite
-- **JSON**: serde
-- **JWT**: jsonwebtoken
-- **Async**: tokio runtime
-
-### Frontend (Vue.js)
-
-- **Framework**: Vue 3 with Composition API
-- **Build Tool**: Vite
-- **Language**: TypeScript
-- **WebRTC**: Native WebRTC APIs
-
-## Next Steps
-
-1. **Implement WebRTC Frontend**: Create video calling interface
-2. **Add Room Management**: Implement room creation and joining
-3. **Enhanced Authentication**: Add user profiles and permissions
-4. **Testing**: Add comprehensive test suites
-5. **Deployment**: Set up production deployment pipeline
-
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Make changes using Method 1 for development
-4. Test with Method 2 for integration testing
-5. Submit a pull request
+3. Make changes using Docker Compose for testing
+4. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License.
+
+## 🆘 Support
+
+- **Issues**: https://github.com/dakaii/vibertc/issues
+- **Discussions**: https://github.com/dakaii/vibertc/discussions

@@ -23,6 +23,6 @@ WORKDIR /usr/src/app
 COPY --from=production /usr/src/app/dist ./dist
 COPY --from=production /usr/src/app/node_modules ./node_modules
 
-EXPOSE 3000
+EXPOSE 4000
 
 CMD ["npm", "run", "start:prod"]

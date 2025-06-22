@@ -35,7 +35,7 @@ RUN chown app:app /usr/local/bin/signaling
 USER app
 
 # Expose port
-EXPOSE 3002
+EXPOSE 9000
 
 # Start application
 CMD ["signaling"]

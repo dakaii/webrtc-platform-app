@@ -14,6 +14,16 @@ services:
       - postgres_data:/var/lib/postgresql/data
     networks:
       - webrtc-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${DB_USER:-webrtc_user} -d ${DB_NAME:-webrtc_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   # NestJS Backend
   backend:
@@ -21,20 +31,22 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET=${JWT_SECRET}
+      - DATABASE_URL=postgresql://${DB_USER:-webrtc_user}:${DB_PASSWORD:-webrtc_password}@postgres:5432/${DB_NAME:-webrtc_db}
+      - JWT_SECRET=${JWT_SECRET:-dev-super-secret-jwt-key-change-in-production}
       - NODE_ENV=${NODE_ENV:-development}
-      - CORS_ORIGIN=${CORS_ORIGIN}
+      - PORT=4000
     ports:
       - "${BACKEND_PORT:-4000}:4000"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend:/app
       - /app/node_modules
     networks:
       - webrtc-network
     command: npm run start:dev
+    restart: unless-stopped
 
   # Rust Signaling Server
   signaling:
@@ -42,16 +54,15 @@ services:
       context: ./signaling
       dockerfile: Dockerfile
     environment:
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:-dev-super-secret-jwt-key-change-in-production}
       - RUST_LOG=${RUST_LOG:-info}
-      - SFU_HOST=${SFU_HOST}
-      - SFU_PORT=${SFU_PORT}
     ports:
       - "${SIGNALING_PORT:-9000}:9000"
     volumes:
       - ./signaling:/app
     networks:
       - webrtc-network
+    restart: unless-stopped
 
   # Vue.js Frontend
   frontend:
@@ -63,25 +74,16 @@ services:
       - VITE_WS_URL=ws://localhost:${SIGNALING_PORT:-9000}
     ports:
       - "${FRONTEND_PORT:-8080}:8080"
+    depends_on:
+      - backend
+      - signaling
     volumes:
       - ./frontend:/app
       - /app/node_modules
     networks:
       - webrtc-network
     command: npm run dev
-
-  # Rheomesh SFU (placeholder - will need actual rheomesh setup)
-  sfu:
-    image: alpine:latest
-    command: >
-      sh -c "echo 'Rheomesh SFU placeholder - replace with actual rheomesh container' &&
-             echo 'Visit https://github.com/h3poteto/rheomesh for setup instructions' &&
-             tail -f /dev/null"
-    ports:
-      - "${SFU_PORT:-8080}:8080"
-      - "${SFU_SIGNALING_PORT:-8081}:8081"
-    networks:
-      - webrtc-network
+    restart: unless-stopped
 
 volumes:
   postgres_data:
