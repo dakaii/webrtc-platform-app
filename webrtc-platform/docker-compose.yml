@@ -1,0 +1,91 @@
+version: "3.8"
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-webrtc_db}
+      POSTGRES_USER: ${DB_USER:-webrtc_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-webrtc_password}
+    ports:
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - webrtc-network
+
+  # NestJS Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET=${JWT_SECRET}
+      - NODE_ENV=${NODE_ENV:-development}
+      - CORS_ORIGIN=${CORS_ORIGIN}
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - webrtc-network
+    command: npm run start:dev
+
+  # Rust Signaling Server
+  signaling:
+    build:
+      context: ./signaling
+      dockerfile: Dockerfile
+    environment:
+      - JWT_SECRET=${JWT_SECRET}
+      - RUST_LOG=${RUST_LOG:-info}
+      - SFU_HOST=${SFU_HOST}
+      - SFU_PORT=${SFU_PORT}
+    ports:
+      - "${SIGNALING_PORT:-3002}:3002"
+    volumes:
+      - ./signaling:/app
+    networks:
+      - webrtc-network
+
+  # Vue.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - VITE_API_URL=http://localhost:${BACKEND_PORT:-3001}
+      - VITE_WS_URL=ws://localhost:${SIGNALING_PORT:-3002}
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - webrtc-network
+    command: npm run dev
+
+  # Rheomesh SFU (placeholder - will need actual rheomesh setup)
+  sfu:
+    image: alpine:latest
+    command: >
+      sh -c "echo 'Rheomesh SFU placeholder - replace with actual rheomesh container' &&
+             echo 'Visit https://github.com/h3poteto/rheomesh for setup instructions' &&
+             tail -f /dev/null"
+    ports:
+      - "${SFU_PORT:-8080}:8080"
+      - "${SFU_SIGNALING_PORT:-8081}:8081"
+    networks:
+      - webrtc-network
+
+volumes:
+  postgres_data:
+
+networks:
+  webrtc-network:
+    driver: bridge
