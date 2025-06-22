@@ -8,7 +8,7 @@ use uuid::Uuid;
 use tracing::{info, error, debug};
 use anyhow::Result;
 
-use crate::auth::{JwtValidator, extract_token_from_query};
+use crate::auth::{JwtValidator};
 use crate::room::{RoomManager, RoomParticipant};
 use crate::messages::{ClientMessage, ServerMessage};
 
@@ -60,14 +60,18 @@ async fn handle_connection(
         }
     });
 
-    // Wait for authentication
-    let user = match authenticate_connection(&mut ws_receiver, &jwt_validator, &tx).await {
+    // Wait for authentication message (first message should be auth)
+    let user = match authenticate_connection(&mut ws_receiver, &jwt_validator).await {
         Ok(user) => user,
         Err(e) => {
             error!("Authentication failed: {}", e);
+            let error_msg = ServerMessage::error(format!("Authentication failed: {}", e));
+            let _ = send_message(&tx, error_msg);
             return Ok(());
         }
     };
+
+    println!("DEBUG: Authenticated user: {}", user.username);
 
     info!("User {} ({}) authenticated successfully", user.user_id, user.username);
 
@@ -131,21 +135,58 @@ async fn handle_connection(
 async fn authenticate_connection(
     ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>,
     jwt_validator: &JwtValidator,
-    _tx: &mpsc::UnboundedSender<Message>,
 ) -> Result<crate::auth::AuthenticatedUser, String> {
+    debug!("Waiting for authentication message...");
+    println!("DEBUG: authenticate_connection called");
+
     // Wait for the first message which should contain the JWT token
     if let Some(msg_result) = ws_receiver.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                debug!("Received authentication message");
+                debug!("Received authentication message: {}", text);
+                println!("DEBUG: Received authentication message: {}", text);
 
-                // Try to parse as query string to extract token
-                if let Some(token) = extract_token_from_query(&text) {
-                    return jwt_validator.validate_token(&token);
+                // Try to parse as ClientMessage::Auth
+                debug!("Attempting to parse as ClientMessage::Auth...");
+                println!("DEBUG: Attempting to parse as ClientMessage::Auth...");
+                match serde_json::from_str::<ClientMessage>(&text) {
+                    Ok(client_message) => {
+                        debug!("Successfully parsed as ClientMessage: {:?}", client_message);
+                        println!("DEBUG: Successfully parsed as ClientMessage: {:?}", client_message);
+                        match client_message {
+                            ClientMessage::Auth { token } => {
+                                debug!("Extracted token from Auth message: {}", token);
+                                println!("DEBUG: Extracted token from Auth message: {}", token);
+                                return jwt_validator.validate_token(&token);
+                            }
+                            _ => {
+                                debug!("Parsed as non-Auth message type");
+                                println!("DEBUG: Parsed as non-Auth message type");
+                                return Err("Expected Auth message, got other message type".to_string());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Failed to parse as ClientMessage: {}", e);
+                        println!("DEBUG: Failed to parse as ClientMessage: {}", e);
+                    }
                 }
 
-                // Fallback: try to parse the text directly as a token
-                jwt_validator.validate_token(&text)
+                // Fallback: try to parse as generic JSON with token field
+                debug!("Attempting fallback: parsing as generic JSON...");
+                if let Ok(auth_msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                    debug!("Successfully parsed as generic JSON: {:?}", auth_msg);
+                    if let Some(token) = auth_msg.get("token").and_then(|t| t.as_str()) {
+                        debug!("Extracted token from generic auth message: {}", token);
+                        return jwt_validator.validate_token(token);
+                    } else {
+                        debug!("No 'token' field found in JSON");
+                        return Err("No 'token' field found in authentication message".to_string());
+                    }
+                } else {
+                    debug!("Failed to parse as generic JSON");
+                    return Err("Invalid JSON format in authentication message".to_string());
+                }
             }
             Ok(Message::Close(_)) => {
                 Err("Connection closed during authentication".to_string())
@@ -175,6 +216,11 @@ async fn handle_client_message(
         .map_err(|e| format!("Invalid JSON: {}", e))?;
 
     match client_message {
+        ClientMessage::Auth { .. } => {
+            let error_msg = ServerMessage::error("Authentication already completed");
+            send_message(tx, error_msg)?;
+        }
+
         ClientMessage::JoinRoom { room_name, password: _ } => {
             let participant = RoomParticipant {
                 user: user.clone(),
