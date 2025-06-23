@@ -10,7 +10,7 @@ services:
     environment:
       - NODE_ENV=development
       - DB_HOST=db
-      - DB_PORT=5432
+      - DB_PORT=5436
       - DB_USER=postgres
       - DB_PASSWORD=postgres
       - DB_NAME=chirp_db
@@ -24,7 +24,7 @@ services:
   db:
     image: postgres:15-alpine
     ports:
-      - '5432:5432'
+      - '5436:5432'
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres

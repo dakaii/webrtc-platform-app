@@ -17,7 +17,7 @@ function getTestDatabaseConfig() {
     return {
       TEST_DB_NAME: process.env.TEST_DB_NAME || 'chirp_test',
       TEST_DB_HOST: process.env.TEST_DB_HOST || 'localhost',
-      TEST_DB_PORT: process.env.TEST_DB_PORT || '5432',
+      TEST_DB_PORT: process.env.TEST_DB_PORT || '5437',
       TEST_DB_USER: process.env.TEST_DB_USER || 'postgres',
       TEST_DB_PASSWORD: process.env.TEST_DB_PASSWORD || 'postgres',
     };
