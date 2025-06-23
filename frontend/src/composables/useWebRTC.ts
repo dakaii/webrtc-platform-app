@@ -163,38 +163,72 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     try {
       switch (message.type) {
         case "offer":
-          console.log("Received offer from", participantId);
+          console.log(
+            "Received offer from",
+            participantId,
+            "PC state:",
+            pc.signalingState
+          );
           if (message.sdp) {
-            await pc.setRemoteDescription(
-              new RTCSessionDescription({ type: "offer", sdp: message.sdp })
-            );
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
+            // Only handle offer if we're in the right state
+            if (
+              pc.signalingState === "stable" ||
+              pc.signalingState === "have-remote-offer"
+            ) {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription({ type: "offer", sdp: message.sdp })
+              );
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
 
-            // Send answer back
-            if (currentRoomId.value) {
-              webSocketService.send({
-                type: "answer",
-                roomName: currentRoomId.value,
-                targetUserId: parseInt(participantId),
-                sdp: answer.sdp,
-              });
+              // Send answer back
+              if (currentRoomId.value) {
+                console.log("Sending answer to", participantId);
+                webSocketService.send({
+                  type: "answer",
+                  roomName: currentRoomId.value,
+                  targetUserId: parseInt(participantId),
+                  sdp: answer.sdp,
+                });
+              }
+            } else {
+              console.log(
+                "Ignoring offer due to signaling state:",
+                pc.signalingState
+              );
             }
           }
           break;
 
         case "answer":
-          console.log("Received answer from", participantId);
+          console.log(
+            "Received answer from",
+            participantId,
+            "PC state:",
+            pc.signalingState
+          );
           if (message.sdp) {
-            await pc.setRemoteDescription(
-              new RTCSessionDescription({ type: "answer", sdp: message.sdp })
-            );
+            // Only handle answer if we're expecting one
+            if (pc.signalingState === "have-local-offer") {
+              await pc.setRemoteDescription(
+                new RTCSessionDescription({ type: "answer", sdp: message.sdp })
+              );
+              console.log(
+                "Answer set successfully, PC state:",
+                pc.signalingState
+              );
+            } else {
+              console.log(
+                "Ignoring answer due to signaling state:",
+                pc.signalingState
+              );
+            }
           }
           break;
 
         case "ice-candidate":
           console.log("Received ICE candidate from", participantId);
-          if (message.candidate) {
+          if (message.candidate && pc.remoteDescription) {
             await pc.addIceCandidate(
               new RTCIceCandidate({
                 candidate: message.candidate,
@@ -202,6 +236,8 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
                 sdpMLineIndex: message.sdpMLineIndex || undefined,
               })
             );
+          } else if (!pc.remoteDescription) {
+            console.log("Queueing ICE candidate - no remote description yet");
           }
           break;
       }
@@ -214,11 +250,25 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     participantId: string
   ): Promise<void> => {
     console.log("Creating offer for participant:", participantId);
-    const pc = createPeerConnection(participantId);
+    let pc = peerConnections.get(participantId);
+
+    if (!pc) {
+      pc = createPeerConnection(participantId);
+    }
+
+    // Only create offer if we're in stable state
+    if (pc.signalingState !== "stable") {
+      console.log(
+        "Skipping offer creation - PC not in stable state:",
+        pc.signalingState
+      );
+      return;
+    }
 
     try {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      console.log("Created and set local offer, PC state:", pc.signalingState);
 
       // Send offer via WebSocket
       if (currentRoomId.value) {
@@ -242,8 +292,13 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
 
     if (existingIndex === -1) {
       remoteParticipants.value.push(participant);
-      // Create offer for new participant
-      createOfferForParticipant(participant.id);
+
+      // Add a small random delay to prevent race conditions when both users join simultaneously
+      const delay = Math.random() * 200;
+
+      setTimeout(() => {
+        createOfferForParticipant(participant.id);
+      }, delay);
     }
   };
 
@@ -272,9 +327,11 @@ export function useWebRTC(localVideo: Ref<HTMLVideoElement | undefined>) {
     webSocketService.on("ice-candidate", handleSignalingMessage);
 
     // Send join room message
+    console.log("Sending join-room message for room:", roomId);
     webSocketService.send({
       type: "join-room",
       roomName: roomId,
+      password: undefined,
     });
   };
 
