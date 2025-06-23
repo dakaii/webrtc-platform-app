@@ -5,10 +5,14 @@ import {
   IsNumber,
   Min,
   Max,
+  IsNotEmpty,
+  MinLength,
 } from 'class-validator';
 
 export class CreateRoomDto {
   @IsString()
+  @IsNotEmpty()
+  @MinLength(1)
   name!: string;
 
   @IsOptional()
