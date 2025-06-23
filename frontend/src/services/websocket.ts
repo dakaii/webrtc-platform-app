@@ -120,7 +120,7 @@ class WebSocketService {
     if (handlers) {
       handlers.forEach((handler) => {
         try {
-          handler(message.data);
+          handler(message);
         } catch (error) {
           console.error(
             `Error in WebSocket handler for ${message.type}:`,
