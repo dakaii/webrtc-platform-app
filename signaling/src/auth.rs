@@ -64,3 +64,47 @@ pub fn extract_token_from_query(query: &str) -> Option<String> {
     }
     None
 }
+
+// ALTERNATIVE AUTHENTICATION METHOD (NOT CURRENTLY USED)
+// Cookie-based authentication approach for future use
+// This would be used if we want to authenticate via HTTP cookies instead of first message
+#[allow(dead_code)]
+pub fn extract_token_from_cookies(cookie_header: &str) -> Option<String> {
+    // Parse cookies to extract JWT token
+    // Expected cookies: auth_token, jwt, or token
+    let cookie_names = ["auth_token", "jwt", "token"];
+
+    for cookie in cookie_header.split(';') {
+        let cookie = cookie.trim();
+        for &name in &cookie_names {
+            let prefix = format!("{}=", name);
+            if let Some(stripped) = cookie.strip_prefix(&prefix) {
+                return Some(stripped.to_string());
+            }
+        }
+    }
+    None
+}
+
+// ALTERNATIVE AUTHENTICATION METHOD (NOT CURRENTLY USED)
+// Header-based authentication approach for future use
+// This would extract JWT tokens from HTTP headers during WebSocket upgrade
+#[allow(dead_code)]
+pub fn extract_token_from_headers(headers: &[(&str, &str)]) -> Option<String> {
+    for (name, value) in headers {
+        let name_lower = name.to_lowercase();
+
+        // Check Authorization header with Bearer token
+        if name_lower == "authorization" {
+            if let Some(token) = value.strip_prefix("Bearer ") {
+                return Some(token.to_string());
+            }
+        }
+
+        // Check custom auth headers
+        if name_lower == "x-auth-token" || name_lower == "x-jwt-token" {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
