@@ -1,15 +1,15 @@
 use chrono::{DateTime, Utc};
+use futures_util::StreamExt;
 use redis::{AsyncCommands, Client as RedisClient};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tokio_tungstenite::tungstenite::Message;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::auth::AuthenticatedUser;
 use crate::messages::{Participant, ServerMessage};
 use crate::room::{LocalRoomManager, RoomManagerTrait, RoomParticipant};
 
@@ -89,8 +89,8 @@ impl ClusterRoomManager {
         let redis_client = RedisClient::open(redis_url)?;
 
         // Test Redis connection
-        let mut conn = redis_client.get_async_connection().await?;
-        let _: String = conn.ping().await?;
+        let mut conn = redis_client.get_multiplexed_async_connection().await?;
+        let _: String = redis::cmd("PING").query_async(&mut conn).await?;
         info!("Successfully connected to Redis cluster coordinator");
 
         let manager = Self {
@@ -111,11 +111,8 @@ impl ClusterRoomManager {
 
     /// Start Redis pub/sub listener for cluster messages
     async fn start_pubsub_listener(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut pubsub = self
-            .redis_client
-            .get_async_connection()
-            .await?
-            .into_pubsub();
+        let conn = self.redis_client.get_async_connection().await?;
+        let mut pubsub = conn.into_pubsub();
         pubsub.subscribe("cluster:messages").await?;
 
         let local_connections = Arc::clone(&self.local_connections);
@@ -214,10 +211,28 @@ impl ClusterRoomManager {
                         from_user, to_user
                     );
 
-                    let message = ServerMessage::WebRTCSignal {
-                        from_user,
-                        signal_type,
-                        signal_data,
+                    let message = match signal_type.as_str() {
+                        "offer" => ServerMessage::Offer {
+                            room_name: "cluster".to_string(), // TODO: pass actual room name
+                            from_user_id: from_user,
+                            sdp: signal_data,
+                        },
+                        "answer" => ServerMessage::Answer {
+                            room_name: "cluster".to_string(),
+                            from_user_id: from_user,
+                            sdp: signal_data,
+                        },
+                        "ice-candidate" => ServerMessage::IceCandidate {
+                            room_name: "cluster".to_string(),
+                            from_user_id: from_user,
+                            candidate: signal_data,
+                            sdp_mid: None,
+                            sdp_mline_index: None,
+                        },
+                        _ => {
+                            warn!("Unknown signal type: {}", signal_type);
+                            return;
+                        }
                     };
 
                     if let Ok(json_message) = serde_json::to_string(&message) {
@@ -272,19 +287,20 @@ impl ClusterRoomManager {
             loop {
                 interval.tick().await;
 
-                match redis_client.get_async_connection().await {
+                match redis_client.get_multiplexed_async_connection().await {
                     Ok(mut conn) => {
                         let connection_count = local_connections.read().await.len();
 
+                        let timestamp = Utc::now().timestamp() as u64;
                         let heartbeat = ClusterMessage::ServerHeartbeat {
                             node_id: node_id.clone(),
-                            timestamp: Utc::now().timestamp() as u64,
+                            timestamp,
                             connection_count,
                         };
 
                         // Update server registry with TTL (expires in 30 seconds)
                         let server_key = format!("servers:{}:heartbeat", node_id);
-                        if let Err(e) = conn.setex(&server_key, 30, heartbeat.timestamp).await {
+                        if let Err(e) = conn.set_ex::<_, _, ()>(&server_key, timestamp, 30).await {
                             warn!("Failed to update heartbeat in Redis: {}", e);
                         }
 
@@ -324,11 +340,13 @@ impl ClusterRoomManager {
             loop {
                 interval.tick().await;
 
-                let is_healthy = match redis_client.get_async_connection().await {
-                    Ok(mut conn) => match conn.ping().await {
-                        Ok(_) => true,
-                        Err(_) => false,
-                    },
+                let is_healthy = match redis_client.get_multiplexed_async_connection().await {
+                    Ok(mut conn) => {
+                        match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
+                            Ok(_) => true,
+                            Err(_) => false,
+                        }
+                    }
                     Err(_) => false,
                 };
 
@@ -352,11 +370,12 @@ impl ClusterRoomManager {
         user_id: u32,
         username: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Add user to room participants list in Redis
         let room_key = format!("rooms:{}:participants", room_id);
-        conn.hset(&room_key, user_id.to_string(), &self.node_id)
+        let _: () = conn
+            .hset(&room_key, user_id.to_string(), &self.node_id)
             .await?;
 
         // Add connection to this server's connection list
@@ -370,7 +389,8 @@ impl ClusterRoomManager {
         };
 
         let connection_json = serde_json::to_string(&connection_info)?;
-        conn.hset(&server_key, user_id.to_string(), connection_json)
+        let _: () = conn
+            .hset(&server_key, user_id.to_string(), connection_json)
             .await?;
 
         Ok(())
@@ -382,22 +402,22 @@ impl ClusterRoomManager {
         room_id: &str,
         user_id: u32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
 
         // Remove from room participants
         let room_key = format!("rooms:{}:participants", room_id);
-        conn.hdel(&room_key, user_id.to_string()).await?;
+        let _: () = conn.hdel(&room_key, user_id.to_string()).await?;
 
         // Remove from server connections
         let server_key = format!("servers:{}:connections", self.node_id);
-        conn.hdel(&server_key, user_id.to_string()).await?;
+        let _: () = conn.hdel(&server_key, user_id.to_string()).await?;
 
         Ok(())
     }
 
     /// Get existing participants from Redis
     async fn get_existing_participants_from_redis(&self, room_id: &str) -> Vec<Participant> {
-        match self.redis_client.get_async_connection().await {
+        match self.redis_client.get_multiplexed_async_connection().await {
             Ok(mut conn) => {
                 let room_key = format!("rooms:{}:participants", room_id);
 
@@ -437,7 +457,7 @@ impl ClusterRoomManager {
         server_node: &str,
         user_id: u32,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        let mut conn = self.redis_client.get_async_connection().await?;
+        let mut conn = self.redis_client.get_multiplexed_async_connection().await?;
         let server_key = format!("servers:{}:connections", server_node);
 
         let connection_json: String = conn.hget(&server_key, user_id.to_string()).await?;
@@ -497,7 +517,7 @@ impl RoomManagerTrait for ClusterRoomManager {
                 target_server: None, // Broadcast to all servers
             };
 
-            if let Ok(mut conn) = self.redis_client.get_async_connection().await {
+            if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
                 if let Ok(message_json) = serde_json::to_string(&join_message) {
                     if let Err(e) = conn
                         .publish::<_, _, ()>("cluster:messages", message_json)
@@ -546,7 +566,7 @@ impl RoomManagerTrait for ClusterRoomManager {
                 target_server: None,
             };
 
-            if let Ok(mut conn) = self.redis_client.get_async_connection().await {
+            if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
                 if let Ok(message_json) = serde_json::to_string(&leave_message) {
                     if let Err(e) = conn
                         .publish::<_, _, ()>("cluster:messages", message_json)
@@ -610,7 +630,7 @@ impl RoomManagerTrait for ClusterRoomManager {
             drop(connections);
 
             // User not local, find which server has them and route via Redis
-            match self.redis_client.get_async_connection().await {
+            match self.redis_client.get_multiplexed_async_connection().await {
                 Ok(mut conn) => {
                     let room_key = format!("rooms:{}:participants", room_name);
 
@@ -619,20 +639,40 @@ impl RoomManagerTrait for ClusterRoomManager {
                         .await
                     {
                         // Create a WebRTC signal message that will be routed to the correct server
-                        if let ServerMessage::WebRTCSignal {
-                            from_user,
-                            signal_type,
-                            signal_data,
-                        } = message
-                        {
-                            let cluster_message = ClusterMessage::WebRTCSignal {
+                        let cluster_message = match &message {
+                            ServerMessage::Offer {
+                                from_user_id, sdp, ..
+                            } => Some(ClusterMessage::WebRTCSignal {
                                 room_id: room_name.to_string(),
-                                from_user,
+                                from_user: *from_user_id,
                                 to_user: target_user_id,
-                                signal_type,
-                                signal_data,
-                            };
+                                signal_type: "offer".to_string(),
+                                signal_data: sdp.clone(),
+                            }),
+                            ServerMessage::Answer {
+                                from_user_id, sdp, ..
+                            } => Some(ClusterMessage::WebRTCSignal {
+                                room_id: room_name.to_string(),
+                                from_user: *from_user_id,
+                                to_user: target_user_id,
+                                signal_type: "answer".to_string(),
+                                signal_data: sdp.clone(),
+                            }),
+                            ServerMessage::IceCandidate {
+                                from_user_id,
+                                candidate,
+                                ..
+                            } => Some(ClusterMessage::WebRTCSignal {
+                                room_id: room_name.to_string(),
+                                from_user: *from_user_id,
+                                to_user: target_user_id,
+                                signal_type: "ice-candidate".to_string(),
+                                signal_data: candidate.clone(),
+                            }),
+                            _ => None, // Not a WebRTC signal, handle locally
+                        };
 
+                        if let Some(cluster_message) = cluster_message {
                             if let Ok(message_json) = serde_json::to_string(&cluster_message) {
                                 if let Err(e) = conn
                                     .publish::<_, _, ()>("cluster:messages", message_json)
@@ -648,6 +688,12 @@ impl RoomManagerTrait for ClusterRoomManager {
                                 );
                                 return Ok(());
                             }
+                        } else {
+                            // Not a WebRTC signal, try to handle locally
+                            return self
+                                .local_manager
+                                .send_to_user_in_room(room_name, target_user_id, message)
+                                .await;
                         }
                     }
 
@@ -667,7 +713,7 @@ impl RoomManagerTrait for ClusterRoomManager {
 
     async fn user_in_room(&self, room_name: &str, user_id: u32) -> bool {
         if self.is_redis_healthy().await {
-            match self.redis_client.get_async_connection().await {
+            match self.redis_client.get_multiplexed_async_connection().await {
                 Ok(mut conn) => {
                     let room_key = format!("rooms:{}:participants", room_name);
                     conn.hexists(&room_key, user_id.to_string())
@@ -690,7 +736,7 @@ impl RoomManagerTrait for ClusterRoomManager {
 
         if self.is_redis_healthy().await {
             // In cluster mode, clean up Redis state
-            if let Ok(mut conn) = self.redis_client.get_async_connection().await {
+            if let Ok(mut conn) = self.redis_client.get_multiplexed_async_connection().await {
                 let server_key = format!("servers:{}:connections", self.node_id);
 
                 // Get user's connection info to find their room
@@ -705,10 +751,11 @@ impl RoomManagerTrait for ClusterRoomManager {
                             // Remove from room
                             let room_key =
                                 format!("rooms:{}:participants", connection_info.room_id);
-                            let _ = conn.hdel(&room_key, user_id.to_string()).await;
+                            let _: Result<(), _> = conn.hdel(&room_key, user_id.to_string()).await;
 
                             // Remove from server connections
-                            let _ = conn.hdel(&server_key, user_id.to_string()).await;
+                            let _: Result<(), _> =
+                                conn.hdel(&server_key, user_id.to_string()).await;
 
                             // Notify other servers
                             let leave_message = ClusterMessage::UserLeft {

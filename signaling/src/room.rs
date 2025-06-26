@@ -153,6 +153,11 @@ pub trait RoomManagerTrait: Send + Sync {
     async fn remove_user_from_all_rooms(&self, user_id: u32, connection_id: Uuid);
     async fn get_room_participants(&self, room_name: &str) -> Vec<Participant>;
     async fn health_check(&self) -> bool;
+
+    // For testing purposes - get access to internal room state
+    fn get_rooms_for_testing(&self) -> Option<Rooms> {
+        None // Default implementation returns None
+    }
 }
 
 // Local implementation (existing behavior)
@@ -311,6 +316,10 @@ impl RoomManagerTrait for LocalRoomManager {
     async fn health_check(&self) -> bool {
         true // Local implementation is always healthy
     }
+
+    fn get_rooms_for_testing(&self) -> Option<Rooms> {
+        Some(self.rooms.clone())
+    }
 }
 
 // Legacy RoomManager for backward compatibility
@@ -328,6 +337,17 @@ impl RoomManager {
     pub fn with_implementation(implementation: Box<dyn RoomManagerTrait>) -> Self {
         Self {
             inner: implementation,
+        }
+    }
+
+    // For test compatibility - expose internal rooms when using LocalRoomManager
+    pub fn get_rooms(&self) -> Rooms {
+        // Try to get rooms from the underlying implementation
+        if let Some(rooms) = self.inner.get_rooms_for_testing() {
+            rooms
+        } else {
+            // Return empty rooms if implementation doesn't support testing
+            Arc::new(RwLock::new(HashMap::new()))
         }
     }
 
