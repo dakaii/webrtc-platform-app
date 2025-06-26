@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 use tokio_tungstenite::tungstenite::Message;
+use tracing::{debug, info, warn};
 use uuid::Uuid;
-use tracing::{info, warn, debug};
 
 use crate::auth::AuthenticatedUser;
-use crate::messages::{ServerMessage, Participant};
+use crate::messages::{Participant, ServerMessage};
 
 #[derive(Debug, Clone)]
 pub struct RoomParticipant {
@@ -36,16 +36,20 @@ impl Room {
             return false;
         }
 
-        info!("User {} ({}) joined room {}",
-              user_id, participant.user.username, self.name);
+        info!(
+            "User {} ({}) joined room {}",
+            user_id, participant.user.username, self.name
+        );
         self.participants.insert(user_id, participant);
         true
     }
 
     pub fn remove_participant(&mut self, user_id: u32) -> Option<RoomParticipant> {
         if let Some(participant) = self.participants.remove(&user_id) {
-            info!("User {} ({}) left room {}",
-                  user_id, participant.user.username, self.name);
+            info!(
+                "User {} ({}) left room {}",
+                user_id, participant.user.username, self.name
+            );
             Some(participant)
         } else {
             None
@@ -53,7 +57,8 @@ impl Room {
     }
 
     pub fn get_participants_list(&self) -> Vec<Participant> {
-        self.participants.values()
+        self.participants
+            .values()
             .map(|p| Participant {
                 user_id: p.user.user_id,
                 username: p.user.username.clone(),
@@ -120,13 +125,42 @@ impl Room {
     }
 }
 
+// Legacy type alias for backward compatibility
 pub type Rooms = Arc<RwLock<HashMap<String, Room>>>;
 
-pub struct RoomManager {
+// New trait-based system for room management
+#[async_trait::async_trait]
+pub trait RoomManagerTrait: Send + Sync {
+    async fn join_room(
+        &self,
+        room_name: String,
+        participant: RoomParticipant,
+    ) -> Result<Vec<Participant>, String>;
+    async fn leave_room(&self, room_name: &str, user_id: u32) -> Result<(), String>;
+    async fn broadcast_to_room(
+        &self,
+        room_name: &str,
+        sender_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String>;
+    async fn send_to_user_in_room(
+        &self,
+        room_name: &str,
+        target_user_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String>;
+    async fn user_in_room(&self, room_name: &str, user_id: u32) -> bool;
+    async fn remove_user_from_all_rooms(&self, user_id: u32, connection_id: Uuid);
+    async fn get_room_participants(&self, room_name: &str) -> Vec<Participant>;
+    async fn health_check(&self) -> bool;
+}
+
+// Local implementation (existing behavior)
+pub struct LocalRoomManager {
     rooms: Rooms,
 }
 
-impl RoomManager {
+impl LocalRoomManager {
     pub fn new() -> Self {
         Self {
             rooms: Arc::new(RwLock::new(HashMap::new())),
@@ -136,10 +170,19 @@ impl RoomManager {
     pub fn get_rooms(&self) -> Rooms {
         self.rooms.clone()
     }
+}
 
-    pub async fn join_room(&self, room_name: String, participant: RoomParticipant) -> Result<Vec<Participant>, String> {
+#[async_trait::async_trait]
+impl RoomManagerTrait for LocalRoomManager {
+    async fn join_room(
+        &self,
+        room_name: String,
+        participant: RoomParticipant,
+    ) -> Result<Vec<Participant>, String> {
         let mut rooms = self.rooms.write().await;
-        let room = rooms.entry(room_name.clone()).or_insert_with(|| Room::new(room_name.clone()));
+        let room = rooms
+            .entry(room_name.clone())
+            .or_insert_with(|| Room::new(room_name.clone()));
 
         let existing_participants = room.get_participants_list();
 
@@ -160,7 +203,7 @@ impl RoomManager {
         }
     }
 
-    pub async fn leave_room(&self, room_name: &str, user_id: u32) -> Result<(), String> {
+    async fn leave_room(&self, room_name: &str, user_id: u32) -> Result<(), String> {
         let mut rooms = self.rooms.write().await;
 
         if let Some(room) = rooms.get_mut(room_name) {
@@ -187,7 +230,12 @@ impl RoomManager {
         }
     }
 
-    pub async fn broadcast_to_room(&self, room_name: &str, sender_id: u32, message: ServerMessage) -> Result<(), String> {
+    async fn broadcast_to_room(
+        &self,
+        room_name: &str,
+        sender_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String> {
         let rooms = self.rooms.read().await;
 
         if let Some(room) = rooms.get(room_name) {
@@ -198,7 +246,12 @@ impl RoomManager {
         }
     }
 
-    pub async fn send_to_user_in_room(&self, room_name: &str, target_user_id: u32, message: ServerMessage) -> Result<(), String> {
+    async fn send_to_user_in_room(
+        &self,
+        room_name: &str,
+        target_user_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String> {
         let rooms = self.rooms.read().await;
 
         if let Some(room) = rooms.get(room_name) {
@@ -209,14 +262,15 @@ impl RoomManager {
         }
     }
 
-    pub async fn user_in_room(&self, room_name: &str, user_id: u32) -> bool {
+    async fn user_in_room(&self, room_name: &str, user_id: u32) -> bool {
         let rooms = self.rooms.read().await;
-        rooms.get(room_name)
+        rooms
+            .get(room_name)
             .map(|room| room.has_participant(user_id))
             .unwrap_or(false)
     }
 
-    pub async fn remove_user_from_all_rooms(&self, user_id: u32, connection_id: Uuid) {
+    async fn remove_user_from_all_rooms(&self, user_id: u32, connection_id: Uuid) {
         let mut rooms = self.rooms.write().await;
         let mut rooms_to_remove = Vec::new();
 
@@ -244,5 +298,89 @@ impl RoomManager {
             rooms.remove(&room_name);
             debug!("Removed empty room: {}", room_name);
         }
+    }
+
+    async fn get_room_participants(&self, room_name: &str) -> Vec<Participant> {
+        let rooms = self.rooms.read().await;
+        rooms
+            .get(room_name)
+            .map(|room| room.get_participants_list())
+            .unwrap_or_default()
+    }
+
+    async fn health_check(&self) -> bool {
+        true // Local implementation is always healthy
+    }
+}
+
+// Legacy RoomManager for backward compatibility
+pub struct RoomManager {
+    pub inner: Box<dyn RoomManagerTrait>,
+}
+
+impl RoomManager {
+    pub fn new() -> Self {
+        Self {
+            inner: Box::new(LocalRoomManager::new()),
+        }
+    }
+
+    pub fn with_implementation(implementation: Box<dyn RoomManagerTrait>) -> Self {
+        Self {
+            inner: implementation,
+        }
+    }
+
+    // Delegate methods to the trait implementation
+    pub async fn join_room(
+        &self,
+        room_name: String,
+        participant: RoomParticipant,
+    ) -> Result<Vec<Participant>, String> {
+        self.inner.join_room(room_name, participant).await
+    }
+
+    pub async fn leave_room(&self, room_name: &str, user_id: u32) -> Result<(), String> {
+        self.inner.leave_room(room_name, user_id).await
+    }
+
+    pub async fn broadcast_to_room(
+        &self,
+        room_name: &str,
+        sender_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String> {
+        self.inner
+            .broadcast_to_room(room_name, sender_id, message)
+            .await
+    }
+
+    pub async fn send_to_user_in_room(
+        &self,
+        room_name: &str,
+        target_user_id: u32,
+        message: ServerMessage,
+    ) -> Result<(), String> {
+        self.inner
+            .send_to_user_in_room(room_name, target_user_id, message)
+            .await
+    }
+
+    pub async fn user_in_room(&self, room_name: &str, user_id: u32) -> bool {
+        self.inner.user_in_room(room_name, user_id).await
+    }
+
+    pub async fn remove_user_from_all_rooms(&self, user_id: u32, connection_id: Uuid) {
+        self.inner
+            .remove_user_from_all_rooms(user_id, connection_id)
+            .await
+    }
+
+    pub async fn get_room_participants(&self, room_name: &str) -> Vec<Participant> {
+        self.inner.get_room_participants(room_name).await
+    }
+
+    pub async fn health_check(&self) -> bool {
+        self.inner.health_check().await
     }
 }

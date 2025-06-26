@@ -1,25 +1,35 @@
+use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
-use futures_util::{SinkExt, StreamExt};
 use uuid::Uuid;
 // Removed url dependency
-use tracing::{info, error, debug};
 use anyhow::Result;
+use tracing::{debug, error, info};
 
-use crate::auth::{JwtValidator};
-use crate::room::{RoomManager, RoomParticipant};
+use crate::auth::JwtValidator;
 use crate::messages::{ClientMessage, ServerMessage};
+use crate::room::{RoomManager, RoomParticipant};
 
 pub async fn start_server(host: String, port: u16, jwt_secret: String) -> Result<()> {
+    let room_manager = RoomManager::new();
+    start_server_with_room_manager(host, port, jwt_secret, room_manager).await
+}
+
+pub async fn start_server_with_room_manager(
+    host: String,
+    port: u16,
+    jwt_secret: String,
+    room_manager: RoomManager,
+) -> Result<()> {
     let addr = format!("{}:{}", host, port);
     let listener = TcpListener::bind(&addr).await?;
 
     info!("WebSocket server listening on: {}", addr);
 
     let jwt_validator = Arc::new(JwtValidator::new(&jwt_secret));
-    let room_manager = Arc::new(RoomManager::new());
+    let room_manager = Arc::new(room_manager);
 
     while let Ok((stream, peer_addr)) = listener.accept().await {
         info!("New connection from: {}", peer_addr);
@@ -73,7 +83,10 @@ async fn handle_connection(
 
     println!("DEBUG: Authenticated user: {}", user.username);
 
-    info!("User {} ({}) authenticated successfully", user.user_id, user.username);
+    info!(
+        "User {} ({}) authenticated successfully",
+        user.user_id, user.username
+    );
 
     // Send authentication confirmation
     let auth_msg = ServerMessage::Authenticated {
@@ -88,15 +101,12 @@ async fn handle_connection(
         while let Some(msg_result) = ws_receiver.next().await {
             match msg_result {
                 Ok(Message::Text(text)) => {
-                    if let Err(e) = handle_client_message(
-                        &text,
-                        &user,
-                        connection_id,
-                        &room_manager,
-                        &tx,
-                    ).await {
+                    if let Err(e) =
+                        handle_client_message(&text, &user, connection_id, &room_manager, &tx).await
+                    {
                         error!("Error handling message: {}", e);
-                        let error_msg = ServerMessage::error(format!("Message handling error: {}", e));
+                        let error_msg =
+                            ServerMessage::error(format!("Message handling error: {}", e));
                         let _ = send_message(&tx, error_msg);
                     }
                 }
@@ -115,7 +125,9 @@ async fn handle_connection(
         }
 
         // Clean up user from all rooms when connection closes
-        room_manager.remove_user_from_all_rooms(user.user_id, connection_id).await;
+        room_manager
+            .remove_user_from_all_rooms(user.user_id, connection_id)
+            .await;
         info!("Cleaned up user {} from all rooms", user.user_id);
     });
 
@@ -133,7 +145,9 @@ async fn handle_connection(
 }
 
 async fn authenticate_connection(
-    ws_receiver: &mut futures_util::stream::SplitStream<tokio_tungstenite::WebSocketStream<TcpStream>>,
+    ws_receiver: &mut futures_util::stream::SplitStream<
+        tokio_tungstenite::WebSocketStream<TcpStream>,
+    >,
     jwt_validator: &JwtValidator,
 ) -> Result<crate::auth::AuthenticatedUser, String> {
     debug!("Waiting for authentication message...");
@@ -152,7 +166,10 @@ async fn authenticate_connection(
                 match serde_json::from_str::<ClientMessage>(&text) {
                     Ok(client_message) => {
                         debug!("Successfully parsed as ClientMessage: {:?}", client_message);
-                        println!("DEBUG: Successfully parsed as ClientMessage: {:?}", client_message);
+                        println!(
+                            "DEBUG: Successfully parsed as ClientMessage: {:?}",
+                            client_message
+                        );
                         match client_message {
                             ClientMessage::Auth { token } => {
                                 debug!("Extracted token from Auth message: {}", token);
@@ -162,7 +179,9 @@ async fn authenticate_connection(
                             _ => {
                                 debug!("Parsed as non-Auth message type");
                                 println!("DEBUG: Parsed as non-Auth message type");
-                                return Err("Expected Auth message, got other message type".to_string());
+                                return Err(
+                                    "Expected Auth message, got other message type".to_string()
+                                );
                             }
                         }
                     }
@@ -188,15 +207,9 @@ async fn authenticate_connection(
                     return Err("Invalid JSON format in authentication message".to_string());
                 }
             }
-            Ok(Message::Close(_)) => {
-                Err("Connection closed during authentication".to_string())
-            }
-            Ok(_) => {
-                Err("Invalid authentication message format".to_string())
-            }
-            Err(e) => {
-                Err(format!("WebSocket error during authentication: {}", e))
-            }
+            Ok(Message::Close(_)) => Err("Connection closed during authentication".to_string()),
+            Ok(_) => Err("Invalid authentication message format".to_string()),
+            Err(e) => Err(format!("WebSocket error during authentication: {}", e)),
         }
     } else {
         Err("No authentication message received".to_string())
@@ -212,8 +225,8 @@ async fn handle_client_message(
 ) -> Result<(), String> {
     debug!("Received message from user {}: {}", user.user_id, text);
 
-    let client_message: ClientMessage = serde_json::from_str(text)
-        .map_err(|e| format!("Invalid JSON: {}", e))?;
+    let client_message: ClientMessage =
+        serde_json::from_str(text).map_err(|e| format!("Invalid JSON: {}", e))?;
 
     match client_message {
         ClientMessage::Auth { .. } => {
@@ -221,7 +234,10 @@ async fn handle_client_message(
             send_message(tx, error_msg)?;
         }
 
-        ClientMessage::JoinRoom { room_name, password: _ } => {
+        ClientMessage::JoinRoom {
+            room_name,
+            password: _,
+        } => {
             let participant = RoomParticipant {
                 user: user.clone(),
                 connection_id,
@@ -260,7 +276,11 @@ async fn handle_client_message(
             }
         }
 
-        ClientMessage::Offer { room_name, sdp, target_user_id } => {
+        ClientMessage::Offer {
+            room_name,
+            sdp,
+            target_user_id,
+        } => {
             if !room_manager.user_in_room(&room_name, user.user_id).await {
                 let error_msg = ServerMessage::error("You are not in this room");
                 send_message(tx, error_msg)?;
@@ -274,15 +294,23 @@ async fn handle_client_message(
             };
 
             if let Some(target_id) = target_user_id {
-                room_manager.send_to_user_in_room(&room_name, target_id, offer_msg).await
+                room_manager
+                    .send_to_user_in_room(&room_name, target_id, offer_msg)
+                    .await
                     .map_err(|e| format!("Failed to send offer: {}", e))?;
             } else {
-                room_manager.broadcast_to_room(&room_name, user.user_id, offer_msg).await
+                room_manager
+                    .broadcast_to_room(&room_name, user.user_id, offer_msg)
+                    .await
                     .map_err(|e| format!("Failed to broadcast offer: {}", e))?;
             }
         }
 
-        ClientMessage::Answer { room_name, sdp, target_user_id } => {
+        ClientMessage::Answer {
+            room_name,
+            sdp,
+            target_user_id,
+        } => {
             if !room_manager.user_in_room(&room_name, user.user_id).await {
                 let error_msg = ServerMessage::error("You are not in this room");
                 send_message(tx, error_msg)?;
@@ -295,11 +323,19 @@ async fn handle_client_message(
                 sdp,
             };
 
-            room_manager.send_to_user_in_room(&room_name, target_user_id, answer_msg).await
+            room_manager
+                .send_to_user_in_room(&room_name, target_user_id, answer_msg)
+                .await
                 .map_err(|e| format!("Failed to send answer: {}", e))?;
         }
 
-        ClientMessage::IceCandidate { room_name, candidate, sdp_mid, sdp_mline_index, target_user_id } => {
+        ClientMessage::IceCandidate {
+            room_name,
+            candidate,
+            sdp_mid,
+            sdp_mline_index,
+            target_user_id,
+        } => {
             if !room_manager.user_in_room(&room_name, user.user_id).await {
                 let error_msg = ServerMessage::error("You are not in this room");
                 send_message(tx, error_msg)?;
@@ -315,10 +351,14 @@ async fn handle_client_message(
             };
 
             if let Some(target_id) = target_user_id {
-                room_manager.send_to_user_in_room(&room_name, target_id, ice_msg).await
+                room_manager
+                    .send_to_user_in_room(&room_name, target_id, ice_msg)
+                    .await
                     .map_err(|e| format!("Failed to send ICE candidate: {}", e))?;
             } else {
-                room_manager.broadcast_to_room(&room_name, user.user_id, ice_msg).await
+                room_manager
+                    .broadcast_to_room(&room_name, user.user_id, ice_msg)
+                    .await
                     .map_err(|e| format!("Failed to broadcast ICE candidate: {}", e))?;
             }
         }
@@ -328,8 +368,8 @@ async fn handle_client_message(
 }
 
 fn send_message(tx: &mpsc::UnboundedSender<Message>, msg: ServerMessage) -> Result<(), String> {
-    let json = serde_json::to_string(&msg)
-        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+    let json =
+        serde_json::to_string(&msg).map_err(|e| format!("Failed to serialize message: {}", e))?;
 
     tx.send(Message::Text(json))
         .map_err(|e| format!("Failed to send message: {}", e))?;

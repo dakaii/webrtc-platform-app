@@ -23,6 +23,25 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Redis for Signaling Cluster Coordination
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-dev-redis-password}
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-dev-redis-password}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - webrtc-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
   # NestJS Backend
   backend:
     build:
@@ -59,8 +78,14 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET:-dev-super-secret-jwt-key-change-in-production}
       - RUST_LOG=debug
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-dev-redis-password}@redis:6379
+      - CLUSTER_MODE=${CLUSTER_MODE:-true}
+      - NODE_ID=${NODE_ID:-signaling-1}
     ports:
       - "${SIGNALING_PORT:-3002}:9000"
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - ./signaling:/app
     networks:
@@ -91,6 +116,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   webrtc-network:
