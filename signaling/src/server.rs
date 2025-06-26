@@ -197,14 +197,14 @@ async fn authenticate_connection(
                     debug!("Successfully parsed as generic JSON: {:?}", auth_msg);
                     if let Some(token) = auth_msg.get("token").and_then(|t| t.as_str()) {
                         debug!("Extracted token from generic auth message: {}", token);
-                        return jwt_validator.validate_token(token);
+                        jwt_validator.validate_token(token)
                     } else {
                         debug!("No 'token' field found in JSON");
-                        return Err("No 'token' field found in authentication message".to_string());
+                        Err("No 'token' field found in authentication message".to_string())
                     }
                 } else {
                     debug!("Failed to parse as generic JSON");
-                    return Err("Invalid JSON format in authentication message".to_string());
+                    Err("Invalid JSON format in authentication message".to_string())
                 }
             }
             Ok(Message::Close(_)) => Err("Connection closed during authentication".to_string()),

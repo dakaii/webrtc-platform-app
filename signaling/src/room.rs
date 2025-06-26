@@ -165,6 +165,12 @@ pub struct LocalRoomManager {
     rooms: Rooms,
 }
 
+impl Default for LocalRoomManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalRoomManager {
     pub fn new() -> Self {
         Self {
@@ -325,6 +331,12 @@ impl RoomManagerTrait for LocalRoomManager {
 // Legacy RoomManager for backward compatibility
 pub struct RoomManager {
     pub inner: Box<dyn RoomManagerTrait>,
+}
+
+impl Default for RoomManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RoomManager {

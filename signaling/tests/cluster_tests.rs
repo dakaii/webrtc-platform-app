@@ -3,12 +3,11 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
-use tokio_test;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use webrtc_signaling::auth::AuthenticatedUser;
-use webrtc_signaling::cluster::{ClusterMessage, ClusterRoomManager, ConnectionInfo};
+use webrtc_signaling::cluster::{ClusterMessage, ConnectionInfo};
 use webrtc_signaling::messages::{Participant, ServerMessage};
 use webrtc_signaling::room::{LocalRoomManager, RoomManagerTrait, RoomParticipant};
 

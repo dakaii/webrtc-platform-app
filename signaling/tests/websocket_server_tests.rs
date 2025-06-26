@@ -1,7 +1,6 @@
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
-use serde_json;
 use std::time::Duration;
 
 use webrtc_signaling::messages::{ClientMessage, ServerMessage};

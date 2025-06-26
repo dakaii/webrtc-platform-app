@@ -35,7 +35,7 @@ fn create_test_token(
 fn test_jwt_validator_creation() {
     let validator = create_test_jwt_validator();
     // Should not panic and create successfully
-    assert!(std::ptr::addr_of!(validator).is_null() == false);
+    assert!(!std::ptr::addr_of!(validator).is_null());
 }
 
 #[test]

@@ -342,10 +342,7 @@ impl ClusterRoomManager {
 
                 let is_healthy = match redis_client.get_multiplexed_async_connection().await {
                     Ok(mut conn) => {
-                        match redis::cmd("PING").query_async::<_, String>(&mut conn).await {
-                            Ok(_) => true,
-                            Err(_) => false,
-                        }
+                        (redis::cmd("PING").query_async::<_, String>(&mut conn).await).is_ok()
                     }
                     Err(_) => false,
                 };

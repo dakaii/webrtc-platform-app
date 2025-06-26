@@ -20,7 +20,7 @@ mod integration_tests {
         }
     }
 
-    fn create_test_participant(user_id: u32, username: &str) -> RoomParticipant {
+    pub fn create_test_participant(user_id: u32, username: &str) -> RoomParticipant {
         let (tx, _rx) = mpsc::unbounded_channel::<Message>();
         RoomParticipant {
             user: create_test_user(user_id, username),
@@ -29,7 +29,7 @@ mod integration_tests {
         }
     }
 
-    fn get_redis_url() -> String {
+    pub fn get_redis_url() -> String {
         env::var("REDIS_URL").unwrap_or_else(|_| "redis://localhost:6379".to_string())
     }
 
@@ -264,10 +264,10 @@ mod integration_tests {
         }
 
         // Test WebRTC signaling between servers
-        let webrtc_message = ServerMessage::WebRTCSignal {
-            from_user: 1001,
-            signal_type: "offer".to_string(),
-            signal_data: "test_sdp_data".to_string(),
+        let webrtc_message = ServerMessage::Offer {
+            room_name: "cross_server_room".to_string(),
+            from_user_id: 1001,
+            sdp: "test_sdp_data".to_string(),
         };
 
         // Alice (server1) sends to Bob (server2)
@@ -421,11 +421,14 @@ mod integration_tests {
     // Helper function to run integration tests if Redis is available
     pub async fn can_connect_to_redis() -> bool {
         let redis_url = get_redis_url();
-        match redis::Client::open(&redis_url) {
+        match redis::Client::open(redis_url) {
             Ok(client) => match client.get_async_connection().await {
                 Ok(mut conn) => {
                     use redis::AsyncCommands;
-                    conn.ping().await.is_ok()
+                    redis::cmd("PING")
+                        .query_async::<_, String>(&mut conn)
+                        .await
+                        .is_ok()
                 }
                 Err(_) => false,
             },
@@ -453,6 +456,8 @@ mod integration_tests {
 mod benchmarks {
     use super::integration_tests::*;
     use std::time::Instant;
+    use webrtc_signaling::cluster::ClusterRoomManager;
+    use webrtc_signaling::room::RoomManagerTrait;
 
     #[tokio::test]
     #[ignore] // Run with `cargo test -- --ignored` when Redis is available

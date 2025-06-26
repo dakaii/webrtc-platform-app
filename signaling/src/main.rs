@@ -73,7 +73,7 @@ async fn initialize_cluster_mode(
         // Generate a unique node ID if not provided
         format!(
             "signaling-{}",
-            uuid::Uuid::new_v4().to_string()[..8].to_string()
+            &uuid::Uuid::new_v4().to_string()[..8]
         )
     });
 
