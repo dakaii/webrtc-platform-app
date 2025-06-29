@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LiveKit API Client Example</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        input, button {
+            padding: 8px 12px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            border: none;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .response {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+        }
+        .success {
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+        }
+        .room-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #f8f9fa;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .form-group {
+            margin: 10px 0;
+        }
+        label {
+            display: inline-block;
+            width: 120px;
+        }
+    </style>
+</head>
+<body>
+    <h1>LiveKit API Client Example</h1>
+    
+    <!-- Token Generation -->
+    <div class="container">
+        <h2>Generate Access Token</h2>
+        <div class="form-group">
+            <label>Identity:</label>
+            <input type="text" id="identity" placeholder="user123" value="user123">
+        </div>
+        <div class="form-group">
+            <label>Room Name:</label>
+            <input type="text" id="roomName" placeholder="test-room" value="test-room">
+        </div>
+        <div class="form-group">
+            <label>Name:</label>
+            <input type="text" id="participantName" placeholder="John Doe" value="John Doe">
+        </div>
+        <button onclick="generateToken()">Generate Token</button>
+        <div id="tokenResponse" class="response"></div>
+    </div>
+
+    <!-- Room Management -->
+    <div class="container">
+        <h2>Room Management</h2>
+        <div class="form-group">
+            <label>Room Name:</label>
+            <input type="text" id="createRoomName" placeholder="new-room" value="new-room">
+        </div>
+        <div class="form-group">
+            <label>Max Participants:</label>
+            <input type="number" id="maxParticipants" placeholder="50" value="10">
+        </div>
+        <button onclick="createRoom()">Create Room</button>
+        <button onclick="listRooms()">List Rooms</button>
+        <div id="roomResponse" class="response"></div>
+        <div id="roomsList"></div>
+    </div>
+
+    <!-- Join LiveKit Meet -->
+    <div class="container">
+        <h2>Test with LiveKit Meet</h2>
+        <p>After generating a token, you can test it with LiveKit Meet:</p>
+        <button onclick="openLiveKitMeet()" id="joinMeetBtn" disabled>Open LiveKit Meet</button>
+        <p><small>This will open meet.livekit.io where you can paste your token to join the room</small></p>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api';
+        let currentToken = null;
+
+        async function makeRequest(endpoint, method = 'GET', body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                };
+                
+                if (body) {
+                    options.body = JSON.stringify(body);
+                }
+
+                const response = await fetch(`${API_URL}${endpoint}`, options);
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.message || 'Request failed');
+                }
+                
+                return data;
+            } catch (error) {
+                throw error;
+            }
+        }
+
+        async function generateToken() {
+            const identity = document.getElementById('identity').value;
+            const roomName = document.getElementById('roomName').value;
+            const name = document.getElementById('participantName').value;
+            
+            try {
+                const response = await makeRequest('/auth/token', 'POST', {
+                    identity,
+                    roomName,
+                    name,
+                    permissions: {
+                        canPublish: true,
+                        canSubscribe: true,
+                        canPublishData: true,
+                    }
+                });
+                
+                currentToken = response.data.token;
+                document.getElementById('tokenResponse').innerHTML = 
+                    `<div class="success">Token generated successfully!</div>
+                     <strong>Token:</strong><br>${currentToken}`;
+                document.getElementById('joinMeetBtn').disabled = false;
+            } catch (error) {
+                document.getElementById('tokenResponse').innerHTML = 
+                    `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function createRoom() {
+            const roomName = document.getElementById('createRoomName').value;
+            const maxParticipants = parseInt(document.getElementById('maxParticipants').value);
+            
+            try {
+                const response = await makeRequest('/rooms', 'POST', {
+                    roomName,
+                    maxParticipants,
+                    metadata: JSON.stringify({ createdBy: 'api-example' })
+                });
+                
+                document.getElementById('roomResponse').innerHTML = 
+                    `<div class="success">Room created successfully!</div>
+                     ${JSON.stringify(response.data, null, 2)}`;
+                
+                // Refresh room list
+                await listRooms();
+            } catch (error) {
+                document.getElementById('roomResponse').innerHTML = 
+                    `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function listRooms() {
+            try {
+                const response = await makeRequest('/rooms');
+                
+                if (response.data.length === 0) {
+                    document.getElementById('roomsList').innerHTML = 
+                        '<p>No active rooms</p>';
+                } else {
+                    const roomsHtml = response.data.map(room => `
+                        <div class="room-item">
+                            <div>
+                                <strong>${room.name}</strong><br>
+                                <small>SID: ${room.sid}</small><br>
+                                <small>Participants: ${room.numParticipants}/${room.maxParticipants}</small>
+                            </div>
+                            <div>
+                                <button onclick="deleteRoom('${room.name}')">Delete</button>
+                                <button onclick="getParticipants('${room.name}')">Participants</button>
+                            </div>
+                        </div>
+                    `).join('');
+                    
+                    document.getElementById('roomsList').innerHTML = 
+                        `<h3>Active Rooms:</h3>${roomsHtml}`;
+                }
+            } catch (error) {
+                document.getElementById('roomsList').innerHTML = 
+                    `<div class="error">Error listing rooms: ${error.message}</div>`;
+            }
+        }
+
+        async function deleteRoom(roomName) {
+            if (!confirm(`Delete room "${roomName}"?`)) return;
+            
+            try {
+                await makeRequest(`/rooms/${roomName}`, 'DELETE');
+                await listRooms();
+            } catch (error) {
+                alert(`Error deleting room: ${error.message}`);
+            }
+        }
+
+        async function getParticipants(roomName) {
+            try {
+                const response = await makeRequest(`/rooms/${roomName}/participants`);
+                
+                const participantsInfo = response.data.length === 0 
+                    ? 'No participants in room'
+                    : response.data.map(p => `- ${p.identity} (${p.name || 'No name'})`).join('\n');
+                
+                alert(`Participants in ${roomName}:\n\n${participantsInfo}`);
+            } catch (error) {
+                alert(`Error getting participants: ${error.message}`);
+            }
+        }
+
+        function openLiveKitMeet() {
+            if (!currentToken) {
+                alert('Please generate a token first');
+                return;
+            }
+            
+            // Open LiveKit Meet in a new tab
+            window.open('https://meet.livekit.io', '_blank');
+            
+            // Copy token to clipboard if supported
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(currentToken).then(() => {
+                    alert('Token copied to clipboard! Paste it in LiveKit Meet to join.');
+                });
+            } else {
+                alert('Use this token in LiveKit Meet:\n\n' + currentToken);
+            }
+        }
+
+        // Load rooms on page load
+        window.onload = () => {
+            listRooms();
+        };
+    </script>
+</body>
+</html>
